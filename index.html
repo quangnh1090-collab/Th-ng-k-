@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Thống kê nhân sự KTNN theo tháng</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --ink:#1c2530; --muted:#65707d;
+  --line:#dde2e8; --accent:#9a1c1c; --accent-soft:#f6ebeb;
+  --ok:#15803d; --ok-soft:#e7f4ec; --warn:#b45309; --warn-soft:#fbf0df;
+  --danger:#b91c1c; --danger-soft:#fbeaea; --blue:#1d4ed8; --blue-soft:#e8eefb;
+  --radius:6px; --shadow:0 1px 2px rgba(20,30,45,.06),0 2px 8px rgba(20,30,45,.05);
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;line-height:1.45}
+button{font-family:inherit;cursor:pointer}
+input,select,button,textarea{font-size:13px}
+a{color:var(--blue)}
+.hidden{display:none!important}
+
+/* Top bar */
+header.top{background:var(--ink);color:#fff;padding:10px 18px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+header.top .brand{font-weight:700;font-size:15px;letter-spacing:.2px}
+header.top .brand small{display:block;font-weight:400;font-size:11px;color:#aab4c0;letter-spacing:.3px}
+header.top .spacer{flex:1}
+header.top .status{font-size:12px;color:#c7cfd9;display:flex;align-items:center;gap:8px}
+.dot{width:8px;height:8px;border-radius:50%;background:#5b6675}
+.dot.saved{background:#34d399}
+
+.btn{border:1px solid var(--line);background:#fff;color:var(--ink);padding:7px 12px;border-radius:var(--radius);font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.btn:hover{background:#f7f8fa}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:#811717}
+.btn.ghost{background:transparent;border-color:#3a4756;color:#fff}
+.btn.ghost:hover{background:#2a3543}
+.btn.sm{padding:4px 9px;font-size:12px}
+.btn.warn{background:var(--warn);border-color:var(--warn);color:#fff}
+.btn.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+nav.tabs{background:var(--panel);border-bottom:1px solid var(--line);padding:0 14px;display:flex;gap:2px;overflow-x:auto}
+nav.tabs button{border:none;background:none;padding:12px 16px;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;position:relative}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+nav.tabs button:hover{color:var(--ink)}
+.badge{display:inline-block;min-width:18px;text-align:center;background:var(--accent);color:#fff;border-radius:10px;font-size:11px;padding:1px 6px;margin-left:6px;font-weight:700}
+.badge.gray{background:#9aa4b0}
+.badge.red{background:#e23d3d}
+
+main{padding:18px;max-width:1500px;margin:0 auto}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);margin-bottom:16px}
+.panel .ph{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.panel .ph h2{margin:0;font-size:15px}
+.panel .ph .sub{font-size:12px;color:var(--muted)}
+.panel .pb{padding:14px 16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.row.tight{gap:8px}
+.field{display:flex;flex-direction:column;gap:3px}
+.field label{font-size:11px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
+.field input,.field select{padding:7px 9px;border:1px solid var(--line);border-radius:5px;background:#fff}
+.spacer{flex:1}
+
+/* Empty / import */
+.dropzone{border:2px dashed var(--line);border-radius:10px;padding:48px;text-align:center;background:#fbfcfd}
+.dropzone.drag{border-color:var(--accent);background:var(--accent-soft)}
+.dropzone h3{margin:6px 0}
+.dropzone p{color:var(--muted);margin:4px 0 16px}
+
+/* Tables */
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius)}
+table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}
+th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
+thead th{background:#eef1f4;position:sticky;top:0;z-index:2;font-size:12px;color:#3a4756;white-space:nowrap}
+tbody tr:hover{background:#fafbfc}
+td.num,th.num{text-align:center;font-variant-numeric:tabular-nums}
+.sum-table td.num{font-weight:600}
+.pos{color:var(--ok)} .neg{color:var(--danger)}
+tr.total-row{background:#f0eaea;font-weight:700}
+tr.total-row td{border-top:2px solid var(--accent)}
+tr.group-row td{background:#eef1f4;font-weight:700;color:#3a4756;letter-spacing:.3px}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700}
+.pill.tang{background:var(--ok-soft);color:var(--ok)}
+.pill.giam{background:var(--danger-soft);color:var(--danger)}
+.cell-input{width:100%;border:1px solid transparent;background:transparent;padding:4px 5px;border-radius:4px}
+.cell-input:focus{border-color:var(--blue);background:#fff;outline:none}
+.cell-input.name{min-width:150px}
+td select.cell-input{appearance:auto}
+.mini{font-size:11px;color:var(--muted)}
+
+.kpi{display:flex;gap:12px;flex-wrap:wrap}
+.kpi .card{flex:1;min-width:150px;border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;background:#fff}
+.kpi .card .v{font-size:24px;font-weight:700}
+.kpi .card .l{font-size:12px;color:var(--muted)}
+.kpi .card.accent{border-left:3px solid var(--accent)}
+
+.alert{padding:10px 14px;border-radius:var(--radius);font-size:13px;margin-bottom:12px;border:1px solid}
+.alert.info{background:var(--blue-soft);border-color:#c5d4f7;color:#1e3a8a}
+.alert.warn{background:var(--warn-soft);border-color:#f1dcb4;color:#7c4a05}
+.alert.ok{background:var(--ok-soft);border-color:#bfe3cc;color:#13633a}
+
+/* retirement card */
+.retire-item{display:flex;align-items:center;gap:14px;padding:10px 14px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:8px;background:#fff}
+.retire-item .when{font-weight:700;min-width:118px}
+.retire-item .days{font-size:12px;font-weight:700;padding:2px 9px;border-radius:10px}
+.days.red{background:var(--danger-soft);color:var(--danger)}
+.days.amber{background:var(--warn-soft);color:var(--warn)}
+.days.gray{background:#eef1f4;color:var(--muted)}
+
+/* modal */
+.overlay{position:fixed;inset:0;background:rgba(20,30,45,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px}
+.modal{background:#fff;border-radius:8px;max-width:640px;width:100%;max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)}
+.modal .mh{padding:14px 18px;border-bottom:1px solid var(--line);font-weight:700;font-size:15px;display:flex;align-items:center;gap:10px}
+.modal .mb{padding:18px}
+.modal .mf{padding:14px 18px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px}
+
+/* toast */
+#toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 18px;border-radius:8px;box-shadow:var(--shadow);z-index:100;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(-4px)}
+
+.unit-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:8px}
+.unit-btn{text-align:left;padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}
+.unit-btn:hover{border-color:var(--accent)}
+.unit-btn.active{border-color:var(--accent);background:var(--accent-soft)}
+.unit-btn .n{font-weight:600}
+.unit-btn .m{font-size:11px;color:var(--muted)}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#eef1f4;color:#5b6675;margin-left:6px}
+.tag.vc{background:var(--blue-soft);color:var(--blue)}
+
+.history-item{display:flex;align-items:center;gap:14px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);margin-bottom:8px;background:#fff}
+.history-item .mon{font-weight:700;font-size:15px;min-width:120px}
+details.help{margin-bottom:8px;border:1px solid var(--line);border-radius:var(--radius);background:#fff}
+details.help summary{padding:10px 14px;font-weight:600;cursor:pointer}
+details.help .hc{padding:0 16px 14px;color:#33414f}
+details.help li{margin:4px 0}
+@media(max-width:700px){ main{padding:10px} .panel .pb{padding:10px} }
+</style>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b5cad">
+  <link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">THỐNG KÊ NHÂN SỰ KTNN<small>Công chức · Viên chức · Lao động hợp đồng — theo tháng</small></div>
+  <div class="spacer"></div>
+  <div class="status" id="monthStatus"></div>
+  <span class="status"><span class="dot" id="saveDot"></span><span id="saveText">Chưa có dữ liệu</span></span>
+  <button class="btn ghost sm" id="btnReset">Nhập file khác</button>
+</header>
+
+<nav class="tabs" id="tabs"></nav>
+<main id="view"></main>
+
+<input type="file" id="fileInput" accept=".xlsx,.xlsm" class="hidden">
+<div id="toast"></div>
+<div id="modalRoot"></div>
+
+<script>
+"use strict";
+// PWA: đăng ký service worker để cài đặt & chạy offline
+if("serviceWorker" in navigator){window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{});});}
+/* ===================== Hằng số nghiệp vụ ===================== */
+const REASONS_UP = ["Tiếp nhận / Tuyển dụng","Điều động đến","Tăng khác"];
+const REASONS_DOWN = ["Chuyển công tác","Điều động đi","Hưu trí","Nghỉ việc","Giảm khác"];
+const ALL_REASONS = ["", ...REASONS_UP, ...REASONS_DOWN];
+const LEAD_HEAD = ["Vụ trưởng","Kiểm toán trưởng","Quyền Kiểm toán trưởng","Chánh Văn phòng","Chánh Thanh tra","Giám đốc","Tổng biên tập"];
+const LEAD_QUYEN = ["Quyền Vụ trưởng"];
+const LEAD_PHO = ["Phó Vụ trưởng","Hàm Phó Vụ trưởng","Phó kiểm toán trưởng","Phó Chánh Văn phòng","Phó Chánh Thanh tra","Phó Giám đốc","Phó Tổng biên tập"];
+const CHUCVU_OPTS = ["","Vụ trưởng","Phó Vụ trưởng","Trưởng phòng","Phó Trưởng phòng","Kiểm toán viên","Chuyên viên",
+  "Quyền Vụ trưởng","Hàm Vụ trưởng","Hàm Phó Vụ trưởng",
+  "Kiểm toán trưởng","Quyền Kiểm toán trưởng","Phó kiểm toán trưởng","Chánh Văn phòng","Phó Chánh Văn phòng",
+  "Chánh Thanh tra","Phó Chánh Thanh tra","Giám đốc","Phó Giám đốc","Tổng biên tập","Phó Tổng biên tập","Nhân viên"];
+// Nhóm & thứ tự sắp xếp chức vụ
+const CV_HEAD = ["vụ trưởng","kiểm toán trưởng","chánh văn phòng","chánh thanh tra","quyền vụ trưởng","giám đốc","tổng biên tập","quyền kiểm toán trưởng"];      // bậc Vụ trưởng
+const CV_PHO  = ["phó vụ trưởng","phó kiểm toán trưởng","phó chánh thanh tra","phó chánh văn phòng","hàm phó vụ trưởng","hàm vụ trưởng","phó giám đốc","phó tổng biên tập"]; // bậc Phó Vụ trưởng
+function cvNorm(t){return String(t||"").trim().toLowerCase();}
+function cvRank(t){
+  const k=cvNorm(t);
+  if(CV_HEAD.includes(k))return 0;
+  if(CV_PHO.includes(k))return 1;
+  if(k==="trưởng phòng")return 2;
+  if(k==="phó trưởng phòng")return 3;
+  if(k==="kiểm toán viên")return 4;
+  if(k==="chuyên viên")return 5;
+  return 6;
+}
+function sortCC(arr){ arr.sort((a,b)=>cvRank(a.chucVu)-cvRank(b.chucVu)); }
+// Nhóm đơn vị "1–17": từ "Vụ Tổ chức cán bộ" đến hết "KTNN chuyên ngành VII"
+function groupUnitNames(){
+  if(!STATE)return [];
+  const cc=STATE.units.filter(u=>u.kind!=="VC").map(u=>u.name);
+  const norm=s=>String(s).replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim().toLowerCase();
+  const si=cc.findIndex(n=>norm(n)==="vụ tổ chức cán bộ");
+  const ei=cc.findIndex(n=>norm(n)==="ktnn chuyên ngành vii");
+  if(si<0||ei<0)return [];
+  return cc.slice(si, ei+1);
+}
+function inGroup(name){ return (STATE&&STATE._group||[]).includes(name); }
+const SPECIAL_SHEETS = ["_Lists","4-2026","Lao động HĐ"];
+
+/* ===================== IndexedDB ===================== */
+const DB_NAME="ktnn_thongke", DB_VER=1;
+let _db=null;
+function db(){
+  return new Promise((res,rej)=>{
+    if(_db) return res(_db);
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=e=>{const d=e.target.result;
+      if(!d.objectStoreNames.contains("kv")) d.createObjectStore("kv");};
+    r.onsuccess=e=>{_db=e.target.result;res(_db);};
+    r.onerror=e=>rej(e.target.error);
+  });
+}
+async function kvGet(k){const d=await db();return new Promise((res,rej)=>{const t=d.transaction("kv","readonly").objectStore("kv").get(k);t.onsuccess=()=>res(t.result);t.onerror=()=>rej(t.error);});}
+async function kvSet(k,v){const d=await db();return new Promise((res,rej)=>{const t=d.transaction("kv","readwrite").objectStore("kv").put(v,k);t.onsuccess=()=>res();t.onerror=()=>rej(t.error);});}
+async function kvDel(k){const d=await db();return new Promise((res,rej)=>{const t=d.transaction("kv","readwrite").objectStore("kv").delete(k);t.onsuccess=()=>res();t.onerror=()=>rej(t.error);});}
+
+/* ===================== State ===================== */
+let STATE=null;            // {fileName,importedAt,trackingMonth,reminderDays,units:[...]}
+let ORIGINAL_BUF=null;     // ArrayBuffer template gốc để xuất
+let HISTORY=[];            // [{month,label,savedAt,snapshot}]
+let RETIRE_MAP={};         // {"ten|ngaysinh": "yyyy-mm-dd"} - giữ qua lần import lại
+let ACTIVE_TAB="dashboard";
+let ACTIVE_UNIT=0;
+let SAVE_TIMER=null;
+
+/* ===================== Tiện ích ===================== */
+const $=s=>document.querySelector(s);
+const el=(t,a={},...kids)=>{const e=document.createElement(t);for(const k in a){if(k==="class")e.className=a[k];else if(k==="html")e.innerHTML=a[k];else if(k.startsWith("on"))e.addEventListener(k.slice(2),a[k]);else if(a[k]!=null)e.setAttribute(k,a[k]);}kids.flat().forEach(c=>{if(c==null)return;e.appendChild(typeof c==="string"?document.createTextNode(c):c);});return e;};
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("show");clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove("show"),2600);}
+function pkey(p){return (p.hoTen||"").trim()+"|"+(p.ngaySinh||"").trim();}
+function todayMonth(){const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+function monthLabel(m){if(!m)return"";const[y,mm]=m.split("-");return "Tháng "+parseInt(mm)+"/"+y;}
+function nextMonth(m){let[y,mm]=m.split("-").map(Number);mm++;if(mm>12){mm=1;y++;}return y+"-"+String(mm).padStart(2,"0");}
+function parseVNDate(s){ // "dd/mm/yyyy" hoặc Date -> Date|null
+  if(!s)return null; if(s instanceof Date)return s;
+  s=String(s).trim();
+  let m=s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); if(m)return new Date(+m[3],+m[2]-1,+m[1]);
+  m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/); if(m)return new Date(+m[1],+m[2]-1,+m[3]);
+  const d=new Date(s); return isNaN(d)?null:d;
+}
+function isoToVN(iso){if(!iso)return"";const[y,m,d]=iso.split("-");return `${d}/${m}/${y}`;}
+function daysUntil(iso){if(!iso)return null;const d=parseVNDate(iso);if(!d)return null;const t=new Date();t.setHours(0,0,0,0);d.setHours(0,0,0,0);return Math.round((d-t)/86400000);}
+
+/* ===================== Lưu dữ liệu trên MÁY NÀY (IndexedDB) ===================== */
+let DIRTY=false;
+function markDirty(){
+  DIRTY=true;
+  $("#saveDot").classList.remove("saved");
+  $("#saveText").textContent="Đang lưu…";
+  clearTimeout(SAVE_TIMER);
+  SAVE_TIMER=setTimeout(saveAll,400);
+}
+async function saveAll(){
+  try{
+    await kvSet("state",STATE);
+    await kvSet("history",HISTORY);
+    await kvSet("retire",RETIRE_MAP);
+    DIRTY=false;
+    $("#saveDot").classList.add("saved");
+    $("#saveText").textContent="Đã lưu trên máy này";
+  }catch(e){ $("#saveText").textContent="Lỗi lưu"; console.error(e); }
+}
+async function loadAll(){
+  try{
+    STATE=await kvGet("state")||null;
+    HISTORY=await kvGet("history")||[];
+    RETIRE_MAP=await kvGet("retire")||{};
+    ORIGINAL_BUF=await kvGet("originalBuf")||null;
+  }catch(e){ STATE=null; HISTORY=[]; RETIRE_MAP={}; ORIGINAL_BUF=null; }
+  if(STATE){ $("#saveDot").classList.add("saved"); $("#saveText").textContent="Đã lưu trên máy này"; }
+  else $("#saveText").textContent="Chưa có dữ liệu";
+}
+
+/* ===================== Import Excel ===================== */
+async function importFile(file){
+  const buf=await file.arrayBuffer();
+  let wb;
+  try{ wb=XLSX.read(buf,{type:"array"}); }
+  catch(e){ alert("Không đọc được file Excel: "+e.message); return; }
+
+  const bases=parseSummaryBases(wb);          // {cc:[{name,C,E,R}], vc:[...]}
+  const units=[];
+  let ccIdx=0, vcIdx=0;
+  wb.SheetNames.forEach(name=>{
+    if(SPECIAL_SHEETS.includes(name)) return;
+    const ws=wb.Sheets[name];
+    const u=parseUnitSheet(name,ws);
+    if(!u) return;
+    const isVC = name.startsWith("VC -") || name.startsWith("VC-");
+    u.kind = isVC ? "VC" : "CC";
+    const b = matchBase(bases,name,isVC, isVC?vcIdx++:ccIdx++);
+    u.baseC=b.C; u.baseE=b.E; u.baseR=b.R; u.baseW=b.W||0; u.baseRow=b.row||null;
+    // gán lại ngày nghỉ hưu đã lưu
+    u.cc.forEach(p=>{const r=RETIRE_MAP[pkey(p)];if(r)p.retireDate=r;});
+    sortCC(u.cc);
+    units.push(u);
+  });
+  if(!units.length){ alert("Không tìm thấy sheet đơn vị hợp lệ trong file."); return; }
+
+  STATE={ fileName:file.name, importedAt:Date.now(), trackingMonth:todayMonth(), reminderDays:60, units, v:2,
+          ccReserve:bases.ccReserve||0, vcReserve:bases.vcReserve||0 };
+  STATE._group=groupUnitNames();
+  ORIGINAL_BUF=buf.slice(0);
+  try{ await kvSet("originalBuf",ORIGINAL_BUF); }catch(_){}
+  await saveAll();
+  ACTIVE_TAB="dashboard"; ACTIVE_UNIT=0;
+  render();
+  toast(`Đã nạp ${units.length} đơn vị từ "${file.name}"`);
+}
+
+function parseSummaryBases(wb){
+  const cc=[], vc=[]; let ccReserve=0, vcReserve=0;
+  const ws=wb.Sheets["4-2026"]; if(!ws)return {cc,vc,ccReserve,vcReserve};
+  const range=XLSX.utils.decode_range(ws["!ref"]);
+  let section=null;
+  for(let r=range.s.r;r<=range.e.r;r++){
+    const bn=cellVal(ws,r,1); // col B
+    if(!bn||typeof bn!=="string")continue;
+    const nm=bn.trim();
+    if(nm==="CÔNG CHỨC"){section="CC";continue;}
+    if(nm==="VIÊN CHỨC"){section="VC";continue;}
+    if(/^TỔNG/i.test(nm))continue;            // bỏ dòng tổng
+    const C=cellNum(ws,r,2), E=cellNum(ws,r,4), R=cellNum(ws,r,17), W=cellNum(ws,r,22);
+    if(/^Dự phòng/i.test(nm)){ if(section==="VC")vcReserve=E||0; else ccReserve=E||0; continue; }
+    if(C==null&&E==null&&R==null)continue;     // bỏ dòng trống
+    const item={name:nm,C:C||0,E:E||0,R:R||0,W:W||0,row:r+1};   // row = số dòng Excel (1-based)
+    if(section==="VC")vc.push(item); else cc.push(item);
+  }
+  return {cc,vc,ccReserve,vcReserve};
+}
+// Bỏ "VC -", bỏ phần trong ngoặc, gộp khoảng trắng, thường hóa
+function normUnit(s){return String(s).replace(/^VC\s*-\s*/i,"").replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim().toLowerCase();}
+function matchBase(bases,sheetName,isVC,idxInKind){
+  const list = isVC ? bases.vc : bases.cc;
+  if(!list||!list.length) return {C:0,E:0,R:0,W:0};
+  const key=normUnit(sheetName);
+  for(const it of list){ if(normUnit(it.name)===key) return it; }
+  if(idxInKind!=null && idxInKind<list.length) return list[idxInKind];
+  return {C:0,E:0,R:0,W:0};
+}
+function cellVal(ws,r,c){const a=XLSX.utils.encode_cell({r,c});const cell=ws[a];return cell?(cell.v):undefined;}
+function cellNum(ws,r,c){const v=cellVal(ws,r,c);return typeof v==="number"?v:(v!=null&&!isNaN(+v)?+v:null);}
+
+function parseUnitSheet(name,ws){
+  if(!ws||!ws["!ref"])return null;
+  const range=XLSX.utils.decode_range(ws["!ref"]);
+  // header row: col B == 'Họ và tên'
+  let hdr=-1;
+  for(let r=range.s.r;r<=Math.min(range.s.r+8,range.e.r);r++){
+    if(String(cellVal(ws,r,1)||"").trim()==="Họ và tên"){hdr=r;break;}
+  }
+  if(hdr<0)return null;
+  const isTotal=v=>{v=String(v||"").trim().toLowerCase();return v==="tổng số"||v==="tổng cộng";};
+  // CC table start (cols A-H, name in B)
+  let ccStart=-1;
+  for(let r=hdr+1;r<=range.e.r;r++){
+    const a=cellVal(ws,r,0), b=cellVal(ws,r,1);
+    if(isTotal(a))continue;
+    if(b!=null&&String(b).trim()!==""){ccStart=r;break;}
+  }
+  // HĐ table start (cols J-Q, name in K)
+  let hdStart=-1;
+  for(let r=hdr+1;r<=range.e.r;r++){
+    const j=cellVal(ws,r,9), k=cellVal(ws,r,10);
+    if(isTotal(j))continue;
+    if(k!=null&&String(k).trim()!==""){hdStart=r;break;}
+  }
+  const readTable=(start,c0)=>{
+    const arr=[]; if(start<0)return arr;
+    let blanks=0;
+    for(let r=start;r<=range.e.r;r++){
+      const ten=cellVal(ws,r,c0+1);
+      if(ten==null||String(ten).trim()===""){blanks++; if(blanks>3)break; continue;}
+      blanks=0;
+      arr.push({
+        hoTen:String(ten).trim(),
+        ngaySinh:fmtCellDate(ws,r,c0+2),
+        gioiTinh:String(cellVal(ws,r,c0+3)||"").trim(),
+        chucVu:String(cellVal(ws,r,c0+4)||"").trim(),
+        tangGiam:String(cellVal(ws,r,c0+5)||"").trim(),
+        lyDo:String(cellVal(ws,r,c0+6)||"").trim(),
+        ghiChu:String(cellVal(ws,r,c0+7)||"").trim(),
+        retireDate:""
+      });
+    }
+    return arr;
+  };
+  const cc=readTable(ccStart,0);
+  const hd=readTable(hdStart,9).map(p=>({hoTen:p.hoTen,ngaySinh:p.ngaySinh,gioiTinh:p.gioiTinh,congViec:p.chucVu,tangGiam:p.tangGiam,lyDo:p.lyDo,ghiChu:p.ghiChu}));
+  // ccStart/hdStart lưu theo SỐ DÒNG EXCEL (bắt đầu từ 1)
+  return { name, sheetName:name, headerRow:hdr+1, ccStart:((ccStart<0?hdr+3:ccStart)+1), hdStart:((hdStart<0?hdr+3:hdStart)+1), cc, hd };
+}
+function fmtCellDate(ws,r,c){
+  const a=XLSX.utils.encode_cell({r,c});const cell=ws[a];if(!cell)return"";
+  if(cell.t==="n"&&cell.v>20000){ // excel serial date
+    const d=XLSX.SSF?XLSX.SSF.parse_date_code(cell.v):null;
+    if(d)return `${String(d.d).padStart(2,"0")}/${String(d.m).padStart(2,"0")}/${d.y}`;
+  }
+  return String(cell.v||"").trim();
+}
+
+/* ===================== Tính toán thống kê (giống sheet 4-2026) ===================== */
+function unitStats(u){
+  const cnt=reason=>u.cc.filter(p=>p.lyDo===reason).length;
+  const G=cnt("Tiếp nhận / Tuyển dụng"), H=cnt("Điều động đến"), I=cnt("Tăng khác");
+  const J=cnt("Chuyển công tác"), K=cnt("Điều động đi"), L=cnt("Hưu trí");
+  const Mng=cnt("Giảm khác")+cnt("Nghỉ việc");
+  const C=u.baseC||0, E=u.baseE||0;
+  const D=C+G+H+I-J-K-L-Mng;
+  const isLead=(u.name==="Lãnh đạo");   // Lãnh đạo: để trống các cột lãnh đạo/cấp phòng/chỉ tiêu
+  const present=p=>p.tangGiam!=="Giảm";
+  const norm=t=>String(t||"").trim().toLowerCase();         // COUNTIF của Excel không phân biệt hoa/thường
+  const HEAD=LEAD_HEAD.map(norm), PHO=LEAD_PHO.map(norm);
+  const inList=(p,arr)=>arr.includes(norm(p.chucVu))&&present(p);
+  const R=isLead?0:(u.baseR||0);
+  const N=isLead?0:u.cc.filter(p=>inList(p,HEAD)).length;
+  const O=isLead?0:u.cc.filter(p=>norm(p.chucVu)==="quyền vụ trưởng"&&present(p)).length;
+  const P=isLead?0:u.cc.filter(p=>inList(p,PHO)).length;
+  const S=isLead?0:u.cc.filter(p=>norm(p.chucVu)==="trưởng phòng"&&present(p)).length;
+  const T=isLead?0:u.cc.filter(p=>norm(p.chucVu)==="phó trưởng phòng"&&present(p)).length;
+  const W=isLead?0:(u.baseW||0);
+  return {C,D,E,F:D-E,G,H,I,J,K,L,M:Mng,
+          N,O,P,Q:isLead?0:(P-3),R,S,T,U:isLead?0:(S-R),V:isLead?0:(T-R*2),W,lead:isLead,
+          hd:u.hd.filter(p=>p.tangGiam!=="Giảm").length};
+}
+function grandTotals(units){
+  const keys=["C","D","E","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","hd"];
+  const t={}; keys.forEach(k=>t[k]=0);
+  units.forEach(u=>{const s=unitStats(u);keys.forEach(k=>t[k]+=s[k]);});
+  t.F=t.D-t.E;
+  return t;
+}
+
+/* ===================== Nhắc nhở hưu trí ===================== */
+function retireList(){
+  const out=[];
+  if(!STATE)return out;
+  STATE.units.forEach(u=>u.cc.forEach(p=>{
+    if(p._mirror)return;
+    if(p.tangGiam==="Giảm")return;            // đã giảm thì không nhắc nữa
+    if(p.retireDate){const d=daysUntil(p.retireDate);out.push({unit:u.name,p,iso:p.retireDate,days:d});}
+  }));
+  out.sort((a,b)=>(a.days==null?1e9:a.days)-(b.days==null?1e9:b.days));
+  return out;
+}
+function dueCount(){const w=STATE?STATE.reminderDays:60;return retireList().filter(r=>r.days!=null&&r.days<=w).length;}
+// Đến hạn hưu (trong/trước tháng theo dõi) thì tự động chuyển thành Giảm/Hưu trí
+function endOfTrackingMonth(){const[y,m]=STATE.trackingMonth.split("-").map(Number);return new Date(y,m,0,23,59,59);}
+function applyRetirements(){
+  if(!STATE)return;
+  const end=endOfTrackingMonth();
+  STATE.units.forEach(u=>u.cc.forEach(p=>{
+    if(p._mirror||!p.retireDate)return;
+    const d=parseVNDate(p.retireDate); if(!d)return;
+    if(d<=end && p.tangGiam!=="Giảm"){ p.tangGiam="Giảm"; p.lyDo="Hưu trí"; }
+  }));
+}
+
+/* ===================== Hồ sơ (nộp về / chuyển đi) ===================== */
+function collectHoSo(){
+  const incoming=[], outgoing=[];
+  if(!STATE)return {incoming,outgoing};
+  STATE.units.forEach(u=>u.cc.forEach(p=>{
+    if(p._mirror)return;
+    if(isTransferReason(p.lyDo)&&p._destUnit){
+      const from = p.lyDo==="Điều động đi"? u.name : p._destUnit;
+      const to   = p.lyDo==="Điều động đi"? p._destUnit : u.name;
+      if(inGroup(to)&&!inGroup(from))
+        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đến từ ngoài nhóm",done:!!p._hoSoNop,kind:"nop"});
+      else if(inGroup(from)&&!inGroup(to))
+        outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đi ra ngoài nhóm",done:!!p._hoSoChuyen,kind:"chuyen"});
+    }
+    if(cvNorm(p.chucVu)==="phó kiểm toán trưởng" && p.tangGiam==="Tăng"){
+      if(!incoming.some(it=>it.p===p))
+        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Bổ nhiệm Phó Kiểm toán trưởng",done:!!p._hoSoNop,kind:"nop"});
+    }
+  }));
+  return {incoming,outgoing};
+}
+function hoSoWarnCount(){const {incoming,outgoing}=collectHoSo();return incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;}
+function renderHoSo(){
+  const frag=document.createDocumentFragment();
+  const {incoming,outgoing}=collectHoSo();
+  const warn=incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;
+  const top=el("div",{class:"panel"});
+  top.appendChild(el("div",{class:"ph"},el("h2",{},"Quản lý hồ sơ điều động / bổ nhiệm"),
+    el("span",{class:"sub"},"Nhóm có hồ sơ: từ Vụ Tổ chức cán bộ đến hết KTNN chuyên ngành VII")));
+  const msg = warn>0
+    ? el("div",{class:"alert",style:"background:#fff4e5;border:1px solid #ffb648;color:#8a4b00"}, "⚠ Còn "+warn+" hồ sơ chưa xử lý (xem danh sách bên dưới).")
+    : el("div",{class:"alert info"}, "✔ Tất cả hồ sơ đã được xử lý.");
+  top.appendChild(el("div",{class:"pb"},msg));
+  frag.appendChild(top);
+
+  frag.appendChild(hoSoTable("Hồ sơ cần NHẬN VỀ ("+incoming.filter(i=>!i.done).length+" chưa nhận)",incoming,"nop","Đã nhận hồ sơ"));
+  frag.appendChild(hoSoTable("Hồ sơ cần CHUYỂN ĐI ("+outgoing.filter(o=>!o.done).length+" chưa chuyển)",outgoing,"chuyen","Đã chuyển hồ sơ"));
+  return frag;
+}
+function hoSoTable(title,items,kind,doneLabel){
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},title)));
+  const wrap=el("div",{class:"table-wrap"});
+  const tbl=el("table",{});
+  const thead=el("tr",{});["#","Họ và tên","Ngày sinh","Từ → Đến","Lý do","Trạng thái"].forEach(c=>thead.appendChild(el("th",{},c)));
+  tbl.appendChild(el("thead",{},thead));
+  const tb=el("tbody",{});
+  if(!items.length){
+    const tr=el("tr",{});tr.appendChild(el("td",{colspan:"6",class:"mini",style:"text-align:center;padding:14px"},"Không có hồ sơ nào."));tb.appendChild(tr);
+  }
+  items.forEach((it,i)=>{
+    const tr=el("tr",{});
+    if(!it.done) tr.style.background="#fff7ed";
+    tr.appendChild(el("td",{class:"num"},String(i+1)));
+    tr.appendChild(el("td",{},el("strong",{},it.who||"(trống)")));
+    tr.appendChild(el("td",{},it.ns||""));
+    tr.appendChild(el("td",{},(it.from||"—")+" → "+(it.to||"—")));
+    tr.appendChild(el("td",{class:"mini"},it.reason));
+    const cell=el("td",{});
+    const lab=el("label",{style:"display:inline-flex;gap:6px;align-items:center;cursor:pointer"});
+    const cb=el("input",{type:"checkbox"}); cb.checked=it.done;
+    cb.addEventListener("change",()=>{ if(kind==="nop")it.p._hoSoNop=cb.checked; else it.p._hoSoChuyen=cb.checked; markDirty(); render(); });
+    lab.appendChild(cb); lab.appendChild(el("span",{},it.done?doneLabel:el("span",{style:"color:#b45309"},"Chưa — "+doneLabel.toLowerCase())));
+    cell.appendChild(lab);
+    tr.appendChild(cell);
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);wrap.appendChild(tbl);
+  p.appendChild(el("div",{class:"pb"},wrap));
+  return p;
+}
+
+/* ===================== Render khung ===================== */
+function render(){
+  applyRetirements();
+  rebuildTransfers();
+  renderTabs();
+  const v=$("#view"); v.innerHTML="";
+  $("#monthStatus").textContent = STATE? ("Tháng theo dõi: "+monthLabel(STATE.trackingMonth)) : "";
+  if(!STATE){ v.appendChild(renderImport()); return; }
+  if(ACTIVE_TAB==="dashboard") v.appendChild(renderDashboard());
+  else if(ACTIVE_TAB==="units") v.appendChild(renderUnits());
+  else if(ACTIVE_TAB==="retire") v.appendChild(renderRetire());
+  else if(ACTIVE_TAB==="hoso") v.appendChild(renderHoSo());
+  else if(ACTIVE_TAB==="history") v.appendChild(renderHistory());
+  else if(ACTIVE_TAB==="export") v.appendChild(renderExport());
+  else if(ACTIVE_TAB==="help") v.appendChild(renderHelp());
+}
+function renderTabs(){
+  const tabs=$("#tabs"); tabs.innerHTML="";
+  if(!STATE)return;
+  const due=dueCount();
+  const hoso=hoSoWarnCount();
+  const defs=[
+    ["dashboard","Tổng hợp"],
+    ["units","Đơn vị"],
+    ["retire","Nhắc hưu trí",due],
+    ["hoso","Hồ sơ",hoso||null,"red"],
+    ["history","Lịch sử tháng",HISTORY.length||null,"gray"],
+    ["export","Xuất Excel"],
+    ["help","Hướng dẫn"],
+  ];
+  defs.forEach(([id,label,badge,cls])=>{
+    const b=el("button",{class:ACTIVE_TAB===id?"active":"",onclick:()=>{ACTIVE_TAB=id;render();}},label);
+    if(badge) b.appendChild(el("span",{class:"badge"+(cls?" "+cls:"")},String(badge)));
+    tabs.appendChild(b);
+  });
+}
+
+/* ----- Import view ----- */
+function renderImport(){
+  const wrap=el("div",{class:"panel"});
+  wrap.appendChild(el("div",{class:"ph"},el("h2",{},"Bắt đầu — Nạp file Excel gốc")));
+  const dz=el("div",{class:"dropzone"},
+    el("h3",{},"Kéo thả file .xlsx vào đây"),
+    el("p",{},"Hoặc bấm nút bên dưới. App sẽ tự nhận diện các sheet đơn vị, bảng tổng hợp và danh sách lý do biến động."),
+    el("button",{class:"btn primary",onclick:()=>$("#fileInput").click()},"Chọn file Excel"));
+  dz.addEventListener("dragover",e=>{e.preventDefault();dz.classList.add("drag");});
+  dz.addEventListener("dragleave",()=>dz.classList.remove("drag"));
+  dz.addEventListener("drop",e=>{e.preventDefault();dz.classList.remove("drag");const f=e.dataTransfer.files[0];if(f)importFile(f);});
+  wrap.appendChild(el("div",{class:"pb"},dz,
+    el("div",{class:"alert info",style:"margin-top:14px"},"Dữ liệu được lưu ngay trên MÁY NÀY (tự lưu khi bạn chỉnh sửa) — đóng/mở lại vẫn còn. Khi cần mang sang USB hoặc máy khác, vào tab Xuất Excel → bấm “Tạo bản sao lưu”.")));
+  return wrap;
+}
+
+/* ----- Dashboard ----- */
+function renderDashboard(){
+  const frag=el("div",{});
+  const units=STATE.units;
+  const ccUnits=units.filter(u=>u.kind==="CC");
+  const vcUnits=units.filter(u=>u.kind==="VC");
+  const tCC=grandTotals(ccUnits);
+  const tVC=vcUnits.length?grandTotals(vcUnits):null;
+  const ccRes=STATE.ccReserve||0, vcRes=STATE.vcReserve||0;
+  const ccE=tCC.E+ccRes, ccF=tCC.D-ccE;
+
+  // KPI (theo Công chức — khớp với bảng tổng hợp Excel)
+  const kp=el("div",{class:"panel"});
+  kp.appendChild(el("div",{class:"ph"},el("h2",{},"Tổng quan Công chức "+monthLabel(STATE.trackingMonth)),
+    el("span",{class:"sub"},"· đã tính biên chế dự phòng vào tổng")));
+  const fnum=n=>n.toLocaleString("vi-VN");
+  const cards=[
+    card("Đầu kỳ",fnum(tCC.C)),
+    card("Có mặt hiện tại",fnum(tCC.D),"accent"),
+    card("Biên chế giao",fnum(ccE)+(ccRes?(" (gồm DP "+ccRes+")"):"")),
+    card("Thừa / Thiếu",(ccF>0?"+":"")+ccF),
+    card("Tăng / Giảm","+"+(tCC.G+tCC.H+tCC.I)+" / -"+(tCC.J+tCC.K+tCC.L+tCC.M)),
+    card("Sắp nghỉ hưu",String(dueCount())),
+  ];
+  if(tVC) cards.push(card("Viên chức hiện tại",fnum(tVC.D)));
+  kp.appendChild(el("div",{class:"pb"},el("div",{class:"kpi"},...cards)));
+  frag.appendChild(kp);
+
+  // bảng tổng hợp công chức (tổng chỉ tính công chức)
+  frag.appendChild(summaryTable("Công chức theo đơn vị",ccUnits,tCC,true,ccRes,"ccReserve"));
+  if(vcUnits.length){
+    frag.appendChild(summaryTable("Viên chức theo đơn vị",vcUnits,tVC,false,vcRes,"vcReserve"));
+  }
+  return frag;
+}
+function card(l,v,cls){return el("div",{class:"card"+(cls?" "+cls:"")},el("div",{class:"v"},v),el("div",{class:"l"},l));}
+function summaryTable(title,units,tot,showTotal,reserve,reserveKey){
+  reserve=reserve||0;
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},title),
+    el("span",{class:"sub"},"Bấm ô Đầu kỳ / Biên chế / Số phòng / Biệt phái để sửa · cột Chỉ tiêu = thừa(+)/thiếu(-)")));
+  const wrap=el("div",{class:"table-wrap"});
+  const tbl=el("table",{class:"sum-table"});
+  const head=[
+    ["STT",""],["Đơn vị",""],
+    ["Đầu kỳ","Số có mặt đầu kỳ"],["Hiện tại","Số có mặt hiện tại"],["Biên chế","Biên chế giao"],["±","Thừa(+)/Thiếu(-) = Hiện tại − Biên chế"],
+    ["TN/TD","Tiếp nhận / Tuyển dụng"],["ĐĐ đến","Điều động đến"],["Tăng khác",""],["Chuyển CT","Chuyển công tác"],["ĐĐ đi","Điều động đi"],["Hưu trí",""],["Giảm khác",""],
+    ["Vụ tr.","Vụ trưởng và tương đương"],["Hàm Vtr","Hàm Vụ trưởng / Quyền Vụ trưởng"],["P.Vtr","Phó Vụ trưởng và tương đương"],["CT LĐ","Chỉ tiêu lãnh đạo = Phó Vụ trưởng − 3"],
+    ["Phòng","Số phòng"],["TP","Trưởng phòng"],["PTP","Phó Trưởng phòng"],["TP-CT","Chỉ tiêu TP = Trưởng phòng − Số phòng"],["PTP-CT","Chỉ tiêu PTP = Phó TP − Số phòng×2"],
+    ["Biệt phái","Công chức biệt phái"],["HĐ","Lao động hợp đồng"]
+  ];
+  const thead=el("tr",{});head.forEach((h,i)=>thead.appendChild(el("th",{class:i>=2?"num":"",title:h[1]||null},h[0])));
+  tbl.appendChild(el("thead",{},thead));
+  const tb=el("tbody",{});
+  const blank=()=>el("td",{class:"num",style:"color:var(--muted)"},"—");
+  units.forEach((u,idx)=>{
+    const s=unitStats(u);
+    const tr=el("tr",{});
+    tr.appendChild(el("td",{class:"num"},String(idx+1)));
+    tr.appendChild(el("td",{},el("a",{href:"#",onclick:e=>{e.preventDefault();ACTIVE_UNIT=STATE.units.indexOf(u);ACTIVE_TAB="units";render();}},u.name)));
+    tr.appendChild(editNum(u,"baseC",s.C));
+    tr.appendChild(el("td",{class:"num"},String(s.D)));
+    tr.appendChild(editNum(u,"baseE",s.E));
+    tr.appendChild(numCell(s.F,true));
+    [s.G,s.H,s.I,s.J,s.K,s.L,s.M].forEach(x=>tr.appendChild(numCell(x)));
+    if(s.lead){
+      tr.appendChild(blank());tr.appendChild(blank());tr.appendChild(blank());tr.appendChild(blank()); // N,O,P,Q
+      tr.appendChild(blank());                                                                          // R
+      tr.appendChild(blank());tr.appendChild(blank());tr.appendChild(blank());tr.appendChild(blank()); // S,T,U,V
+      tr.appendChild(blank());                                                                          // W
+    }else{
+      [s.N,s.O,s.P].forEach(x=>tr.appendChild(numCell(x)));
+      tr.appendChild(numCell(s.Q,true));
+      tr.appendChild(editNum(u,"baseR",s.R));
+      [s.S,s.T].forEach(x=>tr.appendChild(numCell(x)));
+      tr.appendChild(numCell(s.U,true));
+      tr.appendChild(numCell(s.V,true));
+      tr.appendChild(editNum(u,"baseW",s.W));
+    }
+    tr.appendChild(numCell(s.hd));
+    tb.appendChild(tr);
+  });
+  if(reserveKey){
+    const tr=el("tr",{});
+    tr.appendChild(el("td",{class:"num"},""));
+    tr.appendChild(el("td",{},el("em",{},"Dự phòng")));
+    tr.appendChild(el("td",{class:"num",style:"color:var(--muted)"},"—"));
+    tr.appendChild(el("td",{class:"num",style:"color:var(--muted)"},"—"));
+    const inp=el("input",{class:"cell-input",style:"text-align:center;max-width:64px",type:"number",value:String(reserve)});
+    inp.addEventListener("change",()=>{STATE[reserveKey]=parseInt(inp.value||"0",10)||0;markDirty();render();});
+    tr.appendChild(el("td",{class:"num"},inp));
+    for(let i=0;i<19;i++) tr.appendChild(el("td",{class:"num",style:"color:var(--muted)"},"—"));
+    tb.appendChild(tr);
+  }
+  if(showTotal!==undefined){
+    const totE=tot.E+reserve, totF=tot.D-totE;
+    const tr=el("tr",{class:"total-row"});
+    tr.appendChild(el("td",{class:"num"},""));
+    tr.appendChild(el("td",{},"TỔNG CỘNG"));
+    tr.appendChild(numCell(tot.C));
+    tr.appendChild(numCell(tot.D));
+    tr.appendChild(numCell(totE));
+    tr.appendChild(numCell(totF,true));
+    [tot.G,tot.H,tot.I,tot.J,tot.K,tot.L,tot.M,tot.N,tot.O,tot.P].forEach(x=>tr.appendChild(numCell(x)));
+    tr.appendChild(numCell(tot.Q,true));
+    tr.appendChild(numCell(tot.R));
+    [tot.S,tot.T].forEach(x=>tr.appendChild(numCell(x)));
+    tr.appendChild(numCell(tot.U,true));
+    tr.appendChild(numCell(tot.V,true));
+    tr.appendChild(numCell(tot.W));
+    tr.appendChild(numCell(tot.hd));
+    tb.appendChild(tr);
+  }
+  tbl.appendChild(tb); wrap.appendChild(tbl);
+  p.appendChild(el("div",{class:"pb"},wrap));
+  return p;
+}
+function numCell(n,diff){const cls="num"+(diff&&n>0?" pos":(diff&&n<0?" neg":""));return el("td",{class:cls},(diff&&n>0?"+":"")+n);}
+function editNum(u,field,val){
+  const td=el("td",{class:"num"});
+  const inp=el("input",{class:"cell-input",style:"text-align:center;max-width:64px",value:String(val),type:"number"});
+  inp.addEventListener("change",()=>{u[field]=parseInt(inp.value||"0",10)||0;markDirty();render();});
+  td.appendChild(inp);return td;
+}
+
+/* ----- Units (editor) ----- */
+function renderUnits(){
+  const frag=el("div",{});
+  // chooser
+  const ch=el("div",{class:"panel"});
+  ch.appendChild(el("div",{class:"ph"},el("h2",{},"Chọn đơn vị")));
+  const list=el("div",{class:"unit-list"});
+  STATE.units.forEach((u,i)=>{
+    const s=unitStats(u);
+    list.appendChild(el("button",{class:"unit-btn"+(i===ACTIVE_UNIT?" active":""),onclick:()=>{ACTIVE_UNIT=i;render();}},
+      el("div",{class:"n"},u.name,el("span",{class:"tag"+(u.kind==="VC"?" vc":"")},u.kind)),
+      el("div",{class:"m"},`Có mặt: ${s.D} · CC/VC: ${u.cc.length} · HĐ: ${u.hd.length}`)));
+  });
+  ch.appendChild(el("div",{class:"pb"},list));
+  frag.appendChild(ch);
+
+  const u=STATE.units[ACTIVE_UNIT];
+  if(!u)return frag;
+  frag.appendChild(personTable(u,"cc"));
+  frag.appendChild(personTable(u,"hd"));
+  return frag;
+}
+function isTransferReason(r){ return r==="Điều động đi"||r==="Điều động đến"; }
+function normalizeVNDate(s){
+  if(!s)return"";
+  const d=parseVNDate(s);
+  if(!d||isNaN(d))return String(s).trim();
+  return String(d.getDate()).padStart(2,"0")+"/"+String(d.getMonth()+1).padStart(2,"0")+"/"+d.getFullYear();
+}
+// Luân chuyển nội bộ: tạo lại các dòng "tự động" ở đơn vị nơi đến/đi từ các dòng nguồn
+function rebuildTransfers(){
+  if(!STATE)return;
+  STATE.units.forEach(u=>{ u.cc=u.cc.filter(p=>!p._mirror); sortCC(u.cc); });
+  STATE.units.forEach(u=>u.cc.forEach(person=>{
+    if(!isTransferReason(person.lyDo)||!person._destUnit)return;
+    const dest=STATE.units.find(d=>d.name===person._destUnit);
+    if(!dest||dest===u)return;
+    const out=(person.lyDo==="Điều động đi");
+    dest.cc.push({_mirror:true,
+      hoTen:person.hoTen,ngaySinh:person.ngaySinh,gioiTinh:person.gioiTinh,chucVu:person.chucVu,
+      tangGiam: out?"Tăng":"Giảm", lyDo: out?"Điều động đến":"Điều động đi",
+      ghiChu:(out?"Điều động từ ":"Điều động đi đến ")+u.name, retireDate:""});
+  }));
+}
+function personTable(u,which){
+  const isCC=which==="cc";
+  const arr=u[which];
+  const p=el("div",{class:"panel"});
+  const ph=el("div",{class:"ph"},
+    el("h2",{},isCC?(u.kind==="VC"?"Danh sách viên chức":"Danh sách công chức"):"Lao động hợp đồng"),
+    el("span",{class:"sub"},u.name+" · "+arr.filter(x=>!x._mirror).length+" người"),
+    el("span",{class:"spacer"}));
+  if(isCC) ph.appendChild(el("button",{class:"btn sm",onclick:()=>{sortCC(u.cc);markDirty();render();}},"Sắp xếp theo chức vụ"));
+  ph.appendChild(el("button",{class:"btn sm primary",onclick:()=>{addPerson(u,which);}},"+ Thêm người"));
+  p.appendChild(ph);
+  const wrap=el("div",{class:"table-wrap"});
+  const tbl=el("table",{});
+  const cols=isCC
+    ? ["#","Họ và tên","Ngày sinh","GT","Chức vụ","Tăng/Giảm","Lý do biến động","Nơi đến/đi","Ngày nghỉ hưu","Ghi chú",""]
+    : ["#","Họ và tên","Ngày sinh","GT","Chức vụ / Công việc","Tăng/Giảm","Lý do biến động","Ghi chú",""];
+  const thead=el("tr",{});cols.forEach(c=>thead.appendChild(el("th",{},c)));
+  tbl.appendChild(el("thead",{},thead));
+  const tb=el("tbody",{});
+  arr.forEach((person,i)=>tb.appendChild(personRow(u,which,person,i)));
+  tbl.appendChild(tb);wrap.appendChild(tbl);
+  p.appendChild(el("div",{class:"pb"},wrap));
+  return p;
+}
+function personRow(u,which,person,i){
+  const isCC=which==="cc";
+  const tr=el("tr",{});
+  tr.appendChild(el("td",{class:"num"},String(i+1)));
+  if(isCC && person._mirror){
+    tr.style.background="#f6f8fb";
+    tr.appendChild(el("td",{},el("strong",{},person.hoTen||"(trống)"),el("span",{class:"tag"},"tự động")));
+    tr.appendChild(el("td",{},person.ngaySinh||""));
+    tr.appendChild(el("td",{},person.gioiTinh||""));
+    tr.appendChild(el("td",{},person.chucVu||""));
+    tr.appendChild(el("td",{},person.tangGiam==="Tăng"?el("span",{class:"pill tang"},"Tăng"):el("span",{class:"pill giam"},"Giảm")));
+    tr.appendChild(el("td",{},person.lyDo||""));
+    tr.appendChild(el("td",{class:"mini"},"⟵ liên kết"));
+    tr.appendChild(el("td",{},""));
+    tr.appendChild(el("td",{class:"mini"},person.ghiChu||""));
+    tr.appendChild(el("td",{class:"mini"},"sửa ở đơn vị nguồn"));
+    return tr;
+  }
+  tr.appendChild(td(textIn(person,"hoTen","name",()=>{rebuildTransfers();renderTabs();})));
+  tr.appendChild(td(textIn(person,"ngaySinh",null,()=>{rebuildTransfers();})));
+  tr.appendChild(td(selIn(person,"gioiTinh",["","Nam","Nữ"],false,()=>{rebuildTransfers();})));
+  tr.appendChild(td(isCC?selIn(person,"chucVu",CHUCVU_OPTS,true,()=>{rebuildTransfers();render();}):textIn(person,"congViec")));
+  tr.appendChild(td(selIn(person,"tangGiam",["","Tăng","Giảm"],false,()=>render())));
+  tr.appendChild(td(selIn(person,"lyDo",ALL_REASONS,false,()=>{
+    if(REASONS_UP.includes(person.lyDo))person.tangGiam="Tăng";
+    else if(REASONS_DOWN.includes(person.lyDo))person.tangGiam="Giảm";
+    if(!isTransferReason(person.lyDo))person._destUnit="";
+    render();
+  })));
+  if(isCC){
+    if(isTransferReason(person.lyDo)){
+      const lbl=person.lyDo==="Điều động đi"?"— chọn nơi đến —":"— chọn nơi đi —";
+      const sel=el("select",{class:"cell-input"});
+      ["",...STATE.units.map(x=>x.name).filter(n=>n!==u.name)].forEach(o=>{
+        const op=el("option",{value:o},o||lbl);if(o===(person._destUnit||""))op.selected=true;sel.appendChild(op);});
+      sel.addEventListener("change",()=>{person._destUnit=sel.value;markDirty();render();});
+      tr.appendChild(el("td",{},sel));
+    }else tr.appendChild(el("td",{class:"mini"},"—"));
+    const dt=el("input",{class:"cell-input",placeholder:"dd/mm/yyyy",style:"max-width:110px",value:person.retireDate||""});
+    dt.addEventListener("change",()=>{const v=normalizeVNDate(dt.value);person.retireDate=v;dt.value=v;RETIRE_MAP[pkey(person)]=v;markDirty();renderTabs();});
+    tr.appendChild(el("td",{},dt));
+  }
+  tr.appendChild(td(textIn(person,"ghiChu")));
+  const act=el("td",{style:"white-space:nowrap"});
+  if(person.tangGiam==="Tăng")act.appendChild(el("span",{class:"pill tang"},"Tăng"));
+  if(person.tangGiam==="Giảm")act.appendChild(el("span",{class:"pill giam"},"Giảm"));
+  act.appendChild(el("button",{class:"btn sm",style:"margin-left:6px",title:"Xóa dòng",onclick:()=>{
+    if(confirm(`Xóa "${person.hoTen||"(trống)"}" khỏi danh sách?`)){u[which].splice(i,1);rebuildTransfers();markDirty();render();}
+  }},"✕"));
+  tr.appendChild(act);
+  return tr;
+}
+function td(child){return el("td",{},child);}
+function textIn(obj,field,cls,onChange){
+  const inp=el("input",{class:"cell-input"+(cls?" "+cls:""),value:obj[field]||""});
+  inp.addEventListener("change",()=>{obj[field]=inp.value.trim();markDirty();if(onChange)onChange();else renderTabs();});
+  return inp;
+}
+function selIn(obj,field,opts,allowCustom,onChange){
+  const cur=obj[field]||"";
+  const sel=el("select",{class:"cell-input"});
+  let has=false;
+  opts.forEach(o=>{const op=el("option",{value:o},o||"—");if(o===cur){op.selected=true;has=true;}sel.appendChild(op);});
+  if(allowCustom&&cur&&!has){const op=el("option",{value:cur},cur);op.selected=true;sel.appendChild(op);}
+  sel.addEventListener("change",()=>{obj[field]=sel.value;markDirty();if(onChange)onChange();else renderTabs();});
+  return sel;
+}
+function addPerson(u,which){
+  if(which==="cc")u.cc.push({hoTen:"",ngaySinh:"",gioiTinh:"",chucVu:"",tangGiam:"Tăng",lyDo:"Tiếp nhận / Tuyển dụng",ghiChu:"",retireDate:""});
+  else u.hd.push({hoTen:"",ngaySinh:"",gioiTinh:"",congViec:"Hợp đồng chuyên môn",tangGiam:"Tăng",lyDo:"Tiếp nhận / Tuyển dụng",ghiChu:""});
+  markDirty();render();
+}
+
+/* ----- Retire ----- */
+function renderRetire(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  const w=STATE.reminderDays;
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Nhắc nhở nghỉ hưu"),
+    el("span",{class:"spacer"}),
+    el("div",{class:"field",style:"flex-direction:row;align-items:center;gap:6px"},
+      el("label",{},"Nhắc trước"),
+      (()=>{const i=el("input",{type:"number",value:String(w),style:"width:70px;padding:6px;border:1px solid var(--line);border-radius:5px"});
+        i.addEventListener("change",()=>{STATE.reminderDays=parseInt(i.value||"60",10)||60;markDirty();render();});return i;})(),
+      el("span",{class:"mini"},"ngày"))));
+  const pb=el("div",{class:"pb"});
+  const list=retireList();
+  if(!list.length){
+    pb.appendChild(el("div",{class:"alert info"},"Chưa có ai được nhập ngày nghỉ hưu. Vào tab Đơn vị → cột “Ngày nghỉ hưu” để nhập theo quyết định."));
+  }else{
+    const due=list.filter(r=>r.days!=null&&r.days<=w&&r.days>=0);
+    const past=list.filter(r=>r.days!=null&&r.days<0);
+    const later=list.filter(r=>r.days==null||r.days>w);
+    if(due.length)pb.appendChild(el("div",{class:"alert warn"},`${due.length} người sẽ nghỉ hưu trong vòng ${w} ngày tới.`));
+    [["Sắp đến hạn",due],["Đã qua ngày (chưa xử lý giảm)",past],["Còn xa",later]].forEach(([t,a])=>{
+      if(!a.length)return;
+      pb.appendChild(el("div",{class:"mini",style:"margin:10px 0 6px;font-weight:700;text-transform:uppercase;letter-spacing:.4px"},t));
+      a.forEach(r=>{
+        let cls="gray",txt="—";
+        if(r.days!=null){ if(r.days<0){cls="red";txt=`quá ${-r.days} ngày`;} else if(r.days<=w){cls=r.days<=14?"red":"amber";txt=`còn ${r.days} ngày`;} else {cls="gray";txt=`còn ${r.days} ngày`;} }
+        pb.appendChild(el("div",{class:"retire-item"},
+          el("div",{class:"when"},normalizeVNDate(r.iso)),
+          el("div",{class:"days "+cls},txt),
+          el("div",{style:"flex:1"},el("strong",{},r.p.hoTen||"(chưa có tên)"),el("span",{class:"mini"},"  · "+(r.p.chucVu||"")+" · "+r.unit)),
+          el("button",{class:"btn sm",onclick:()=>{const i=STATE.units.findIndex(u=>u.name===r.unit);if(i>=0){ACTIVE_UNIT=i;ACTIVE_TAB="units";render();}}},"Mở đơn vị")
+        ));
+      });
+    });
+  }
+  p.appendChild(pb);frag.appendChild(p);
+  return frag;
+}
+
+/* ----- History + Chốt tháng ----- */
+function renderHistory(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Lịch sử theo tháng"),
+    el("span",{class:"sub"},"Tháng theo dõi hiện tại: "+monthLabel(STATE.trackingMonth)),
+    el("span",{class:"spacer"}),
+    el("button",{class:"btn warn",onclick:openCloseMonth},"Chốt tháng → sang tháng mới")));
+  const pb=el("div",{class:"pb"});
+  pb.appendChild(el("div",{class:"alert info"},
+    "“Chốt tháng” sẽ: (1) lưu lại toàn bộ số liệu tháng hiện tại để xuất lại sau này, (2) xóa hẳn những người đã đánh dấu Giảm, (3) lấy số người còn lại làm số đầu kỳ của tháng mới và xóa các đánh dấu biến động. Có thể Hoàn tác lần chốt gần nhất."));
+  if(!HISTORY.length){
+    pb.appendChild(el("div",{class:"alert info"},"Chưa có tháng nào được lưu. Mỗi lần “Chốt tháng”, tháng cũ sẽ xuất hiện ở đây và xuất lại file Excel được."));
+  }else{
+    [...HISTORY].reverse().forEach((h)=>{
+      const realIdx=HISTORY.indexOf(h);
+      pb.appendChild(el("div",{class:"history-item"},
+        el("div",{class:"mon"},monthLabel(h.month)),
+        el("div",{style:"flex:1"},el("span",{class:"mini"},"Lưu lúc "+new Date(h.savedAt).toLocaleString("vi-VN")+" · "+(h.snapshot.units?.length||0)+" đơn vị")),
+        el("button",{class:"btn sm",onclick:()=>exportMonth(h)},"Xuất Excel tháng này"),
+        (realIdx===HISTORY.length-1)?el("button",{class:"btn sm",onclick:undoLastClose},"Hoàn tác"):null
+      ));
+    });
+  }
+  p.appendChild(pb);frag.appendChild(p);
+  return frag;
+}
+function snapshotCurrent(){
+  return {month:STATE.trackingMonth,label:monthLabel(STATE.trackingMonth),savedAt:Date.now(),
+    snapshot:JSON.parse(JSON.stringify({trackingMonth:STATE.trackingMonth,units:STATE.units}))};
+}
+function openCloseMonth(){
+  let leavers=0;const detail=[];
+  STATE.units.forEach(u=>{const n=u.cc.filter(p=>p.tangGiam==="Giảm").length;const nh=u.hd.filter(p=>p.tangGiam==="Giảm").length;if(n+nh>0){leavers+=n+nh;detail.push(`${u.name}: −${n+nh}`);}});
+  let detailNode;
+  if(detail.length){
+    const rows=detail.map(d=>el("tr",{},el("td",{},d)));
+    detailNode=el("div",{class:"table-wrap",style:"max-height:200px;margin-top:8px"},el("table",{},el("tbody",{},rows)));
+  }else{
+    detailNode=el("div",{class:"mini"},"Không có ai bị xóa — chỉ reset biến động.");
+  }
+  const body=el("div",{},
+    el("p",{},`Chốt ${monthLabel(STATE.trackingMonth)} và chuyển sang ${monthLabel(nextMonth(STATE.trackingMonth))}.`),
+    el("p",{},el("strong",{},`${leavers} người`)," đã đánh dấu Giảm sẽ bị xóa khỏi danh sách. Số người còn lại trở thành số đầu kỳ tháng mới."),
+    detailNode,
+    el("div",{class:"alert warn",style:"margin-top:12px"},"Số liệu tháng hiện tại sẽ được lưu vào Lịch sử để xuất lại Excel. Bạn có thể Hoàn tác ngay sau khi chốt.")
+  );
+  modal("Xác nhận chốt tháng",body,[
+    {label:"Hủy",cls:"btn"},
+    {label:"Chốt tháng",cls:"btn warn",onClick:doCloseMonth}
+  ]);
+}
+function doCloseMonth(){
+  // 0) "chốt" các dòng luân chuyển: biến dòng tự động thành chính thức, gỡ liên kết
+  STATE.units.forEach(u=>u.cc.forEach(p=>{ delete p._mirror; delete p._destUnit; }));
+  // 1) lưu snapshot tháng hiện tại
+  HISTORY.push(snapshotCurrent());
+  // 2) xóa người Giảm, reset biến động, đặt đầu kỳ = số còn lại
+  STATE.units.forEach(u=>{
+    u.cc=u.cc.filter(p=>p.tangGiam!=="Giảm");
+    u.hd=u.hd.filter(p=>p.tangGiam!=="Giảm");
+    u.cc.forEach(p=>{p.tangGiam="";p.lyDo="";});
+    u.hd.forEach(p=>{p.tangGiam="";p.lyDo="";});
+    u.baseC=u.cc.length; // số đầu kỳ = số người còn lại
+  });
+  STATE.trackingMonth=nextMonth(STATE.trackingMonth);
+  markDirty();render();
+  toast("Đã chốt tháng. Sang "+monthLabel(STATE.trackingMonth));
+}
+function undoLastClose(){
+  if(!HISTORY.length)return;
+  if(!confirm("Hoàn tác lần chốt gần nhất? Dữ liệu sẽ quay về tháng "+monthLabel(HISTORY[HISTORY.length-1].month)+"."))return;
+  const last=HISTORY.pop();
+  STATE.trackingMonth=last.snapshot.trackingMonth;
+  STATE.units=JSON.parse(JSON.stringify(last.snapshot.units));
+  markDirty();render();
+  toast("Đã hoàn tác về "+monthLabel(last.month));
+}
+
+/* ----- Export view ----- */
+function renderExport(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Xuất ra Excel")));
+  const pb=el("div",{class:"pb"});
+  if(!ORIGINAL_BUF){
+    pb.appendChild(el("div",{class:"alert warn"},"Chưa có file gốc làm khuôn. Hãy nạp lại file Excel ở lần đầu để giữ nguyên công thức và định dạng."));
+  }else{
+    pb.appendChild(el("div",{class:"alert info"},"File xuất giữ nguyên công thức bảng tổng hợp và định dạng của file gốc; app chỉ ghi lại danh sách người vào từng sheet đơn vị. Mở bằng Excel/LibreOffice sẽ tự tính lại các số tổng hợp."));
+    pb.appendChild(el("div",{class:"row"},
+      el("button",{class:"btn primary",onclick:()=>exportCurrent()},"Xuất tháng hiện tại ("+monthLabel(STATE.trackingMonth)+")")));
+    if(HISTORY.length){
+      pb.appendChild(el("div",{class:"mini",style:"margin:14px 0 6px;font-weight:700;text-transform:uppercase"},"Xuất tháng đã chốt"));
+      [...HISTORY].reverse().forEach(h=>pb.appendChild(el("div",{class:"row tight",style:"margin-bottom:6px"},
+        el("span",{style:"min-width:130px;font-weight:600"},monthLabel(h.month)),
+        el("button",{class:"btn sm",onclick:()=>exportMonth(h)},"Tải Excel"))));
+    }
+  }
+  p.appendChild(pb);frag.appendChild(p);
+
+  // ----- Sao lưu / Phục hồi (mang sang USB / máy khác) -----
+  const bp=el("div",{class:"panel"});
+  bp.appendChild(el("div",{class:"ph"},el("h2",{},"Sao lưu & Phục hồi (USB / máy khác)"),
+    el("span",{class:"sub"},"Bản sao lưu chứa TOÀN BỘ dữ liệu đang làm + file gốc làm khuôn")));
+  const bpb=el("div",{class:"pb"});
+  bpb.appendChild(el("div",{class:"alert info"},"Khác với Excel: bản sao lưu (.ktnnbak) giữ đủ mọi thứ — danh sách người, biến động, ngày nghỉ hưu, dự phòng, hồ sơ, lịch sử tháng. Lưu file này vào USB; khi sang máy khác hoặc máy hỏng, mở app rồi bấm Phục hồi để dùng tiếp."));
+  bpb.appendChild(el("div",{class:"row"},
+    el("button",{class:"btn primary",onclick:()=>exportBackup()}, STATE?"⬇ Tạo bản sao lưu":"(Chưa có dữ liệu)"),
+    el("button",{class:"btn",onclick:()=>$("#restoreInput").click()},"⬆ Phục hồi từ bản sao lưu")));
+  const ri=el("input",{type:"file",id:"restoreInput",accept:".ktnnbak,.json",style:"display:none"});
+  ri.addEventListener("change",e=>{const f=e.target.files[0];if(f)restoreBackup(f);e.target.value="";});
+  bpb.appendChild(ri);
+  bp.appendChild(bpb);frag.appendChild(bp);
+  return frag;
+}
+/* ----- Sao lưu toàn bộ trạng thái ra 1 file ----- */
+function bufToB64(buf){
+  const bytes=new Uint8Array(buf); let bin=""; const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+CH));
+  return btoa(bin);
+}
+function b64ToBuf(b64){
+  const bin=atob(b64); const bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes.buffer;
+}
+function exportBackup(){
+  if(!STATE){alert("Chưa có dữ liệu để sao lưu.");return;}
+  toast("Đang tạo bản sao lưu…");
+  const data={ _type:"KTNN_THONGKE_BACKUP", v:2, savedAt:Date.now(),
+    state:STATE, history:HISTORY, retire:RETIRE_MAP,
+    originalB64: ORIGINAL_BUF? bufToB64(ORIGINAL_BUF): null };
+  const blob=new Blob([JSON.stringify(data)],{type:"application/octet-stream"});
+  const now=new Date();
+  const stamp=now.getFullYear()+String(now.getMonth()+1).padStart(2,"0")+String(now.getDate()).padStart(2,"0")+"_"+String(now.getHours()).padStart(2,"0")+String(now.getMinutes()).padStart(2,"0");
+  const a=el("a",{href:URL.createObjectURL(blob),download:"SaoLuu_ThongKeNS_"+stamp+".ktnnbak"});
+  document.body.appendChild(a);a.click();a.remove();
+  toast("Đã tạo bản sao lưu — lưu vào USB để an toàn");
+}
+async function restoreBackup(file){
+  if(STATE && DIRTY && !confirm("Dữ liệu hiện tại sẽ bị thay bằng bản sao lưu. Tiếp tục?"))return;
+  try{
+    const text=await file.text();
+    const d=JSON.parse(text);
+    if(d._type!=="KTNN_THONGKE_BACKUP"||!d.state) throw new Error("Sai định dạng");
+    STATE=d.state; HISTORY=d.history||[]; RETIRE_MAP=d.retire||{};
+    ORIGINAL_BUF=d.originalB64? b64ToBuf(d.originalB64): null;
+    if(!STATE._group) STATE._group=groupUnitNames();
+    try{ await kvSet("originalBuf",ORIGINAL_BUF); }catch(_){}
+    await saveAll();
+    ACTIVE_TAB="dashboard";
+    render();
+    toast("Đã phục hồi từ bản sao lưu");
+  }catch(e){ alert("Không đọc được bản sao lưu. File có thể bị hỏng hoặc không đúng định dạng .ktnnbak"); console.error(e); }
+}
+function exportMonth(h){ doExport(h.snapshot, h.month); }
+
+async function doExport(snap, month){
+  if(!ORIGINAL_BUF){alert("Thiếu file gốc làm khuôn. Hãy nạp lại file Excel gốc.");return;}
+  rebuildTransfers();
+  toast("Đang tạo file Excel…");
+  try{
+    const zip=await JSZip.loadAsync(ORIGINAL_BUF);
+    const wbXml=await zip.file("xl/workbook.xml").async("string");
+    const relsXml=await zip.file("xl/_rels/workbook.xml.rels").async("string");
+    // map tên sheet -> đường dẫn file (bằng regex, không dùng DOM)
+    const rels={};
+    relsXml.replace(/<Relationship\b([^>]*?)\/?>/g,(m,a)=>{const id=(a.match(/Id="([^"]+)"/)||[])[1];const tg=(a.match(/Target="([^"]+)"/)||[])[1];if(id&&tg)rels[id]=tg;return m;});
+    const nameToPath={};
+    wbXml.replace(/<sheet\b([^>]*?)\/?>/g,(m,a)=>{
+      const nm=(a.match(/name="([^"]+)"/)||[])[1];
+      const rid=(a.match(/r:id="([^"]+)"/)||[])[1];
+      if(nm&&rid&&rels[rid]){let t=rels[rid].replace(/^\//,"");if(!t.startsWith("xl/"))t="xl/"+t;nameToPath[xmlUnesc(nm)]=t;}
+      return m;
+    });
+    let done=0;
+    for(const u of snap.units){
+      const path=nameToPath[u.sheetName]; if(!path||!zip.file(path))continue;
+      const xml=await zip.file(path).async("string");
+      zip.file(path, patchSheet(xml,u));
+      done++;
+    }
+    // Xóa cache calcChain.xml (thứ tự tính công thức) cùng tham chiếu — tránh Excel báo "sửa chữa".
+    // Excel sẽ tự dựng lại calcChain khi mở file.
+    if(zip.file("xl/calcChain.xml")){
+      zip.remove("xl/calcChain.xml");
+      const ctf=zip.file("[Content_Types].xml");
+      if(ctf){const ct=await ctf.async("string"); zip.file("[Content_Types].xml", ct.replace(/<Override[^>]*calcChain\.xml[^>]*\/>/g,""));}
+      const wrf=zip.file("xl/_rels/workbook.xml.rels");
+      if(wrf){const wr=await wrf.async("string"); zip.file("xl/_rels/workbook.xml.rels", wr.replace(/<Relationship[^>]*calcChain\.xml[^>]*\/>/g,""));}
+    }
+    // Ghi số nền hiện tại của tool (đầu kỳ C / biên chế E / số phòng R) vào bảng tổng hợp 4-2026
+    const sumPath=nameToPath["4-2026"];
+    if(sumPath && zip.file(sumPath)){
+      const sx=await zip.file(sumPath).async("string");
+      zip.file(sumPath, patchSummaryBases(sx, snap.units));
+    }
+    // Buộc Excel tính lại toàn bộ công thức khi mở (để "số có mặt hiện tại" luôn cập nhật)
+    const wbpf=zip.file("xl/workbook.xml");
+    if(wbpf){
+      let wx=await wbpf.async("string");
+      if(/<calcPr\b/.test(wx)){ if(!/fullCalcOnLoad/.test(wx)) wx=wx.replace(/<calcPr\b([^>]*?)\/?>/, m=>m.replace(/\/?>$/,' fullCalcOnLoad="1"/>')); }
+      else { wx=wx.replace(/<\/workbook>/,'<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'); }
+      zip.file("xl/workbook.xml", wx);
+    }
+    const out=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const a=document.createElement("a");
+    a.href=URL.createObjectURL(out);
+    a.download=`ThongKe_NhanSu_${month}.xlsx`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+    toast(`Đã tạo file ${a.download} (${done} đơn vị)`);
+  }catch(e){console.error(e);alert("Lỗi khi xuất Excel: "+e.message);}
+}
+
+/* ===== Vá XML thuần chuỗi: chỉ thay/chèn ô dữ liệu, mọi phần khác giữ nguyên byte ===== */
+function colIdx(letter){let c=0;for(const ch of letter)c=c*26+(ch.charCodeAt(0)-64);return c;}
+function xmlEsc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+function xmlUnesc(s){return String(s).replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&");}
+function expandRow(rowStr,n){ return /\/>\s*$/.test(rowStr) ? rowStr.replace(/\/>\s*$/,"></row>") : rowStr; }
+function setCellInRow(rowStr,col,n,val){
+  const ref=col+n;
+  const re=new RegExp('<c r="'+ref+'"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  const m=rowStr.match(re);
+  let s=""; if(m){const sm=m[1].match(/\bs="(\d+)"/); if(sm)s=' s="'+sm[1]+'"';}
+  const empty=(val==null||String(val).trim()==="");
+  const cell=empty ? ('<c r="'+ref+'"'+s+'/>')
+                   : ('<c r="'+ref+'"'+s+' t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(val)+'</t></is></c>');
+  if(m) return rowStr.replace(re, ()=>cell);
+  // chưa có ô -> chèn đúng thứ tự cột
+  const ci=colIdx(col); const cellRe=/<c r="([A-Z]+)\d+"[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g; let mm,idx=-1;
+  while((mm=cellRe.exec(rowStr))){ if(colIdx(mm[1])>ci){idx=mm.index;break;} }
+  return idx<0 ? rowStr.replace(/<\/row>\s*$/,cell+"</row>") : rowStr.slice(0,idx)+cell+rowStr.slice(idx);
+}
+function cloneRowStr(rows,n){
+  const src=rows.get(n-1)||rows.get(n-2);
+  if(!src) return '<row r="'+n+'"></row>';
+  let t=expandRow(src,n).replace(/^<row r="\d+"/,'<row r="'+n+'"');
+  t=t.replace(/ r="([A-Z]+)\d+"/g,(x,c)=>' r="'+c+n+'"');
+  t=t.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g,(x,a,f)=>'<f'+a+'>'+f.replace(/([A-Z]\$?)\d+/g,(y,p)=>p+n)+'</f>');
+  return t;
+}
+// Ghi số nền (đầu kỳ C, biên chế E, số phòng R) của tool vào bảng tổng hợp theo đúng dòng đơn vị
+function setNumCell(rowStr,col,n,val){
+  const ref=col+n;
+  const re=new RegExp('<c r="'+ref+'"([^>]*?)(?:/>|>[\\s\\S]*?</c>)');
+  const m=rowStr.match(re); let s="";
+  if(m){const sm=m[1].match(/\bs="(\d+)"/); if(sm)s=' s="'+sm[1]+'"';}
+  const num=Number(val);
+  const cell=(val==null||val===""||isNaN(num)) ? ('<c r="'+ref+'"'+s+'/>') : ('<c r="'+ref+'"'+s+'><v>'+num+'</v></c>');
+  return m ? rowStr.replace(re, ()=>cell) : rowStr;
+}
+function patchSummaryBases(xml, units){
+  const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/); if(!sdm)return xml;
+  const rows=new Map(); const rowRe=/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g; let mm;
+  while((mm=rowRe.exec(sdm[2]))) rows.set(+mm[1],mm[0]);
+  units.forEach(u=>{
+    if(!u.baseRow || !rows.has(u.baseRow))return;
+    let rs=rows.get(u.baseRow);
+    rs=setNumCell(rs,"C",u.baseRow,u.baseC);
+    if(u.baseE>0) rs=setNumCell(rs,"E",u.baseRow,u.baseE);
+    if(u.baseR>0) rs=setNumCell(rs,"R",u.baseRow,u.baseR);
+    if(u.baseW>0) rs=setNumCell(rs,"W",u.baseRow,u.baseW);
+    rows.set(u.baseRow,rs);
+  });
+  const allN=[...rows.keys()].sort((a,b)=>a-b);
+  const newBody=allN.map(n=>rows.get(n)).join("");
+  return xml.slice(0,sdm.index)+sdm[1]+newBody+sdm[3]+xml.slice(sdm.index+sdm[0].length);
+}
+function patchSheet(xml,u){
+  const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/);
+  if(!sdm) return xml;
+  const body=sdm[2];
+  const rows=new Map();
+  const rowRe=/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g; let mm;
+  while((mm=rowRe.exec(body))) rows.set(+mm[1],mm[0]);
+  const ccStart=u.ccStart, hdStart=u.hdStart, startMin=Math.min(ccStart,hdStart);
+  let lastFilled=startMin;
+  for(const [n,str] of rows){ if(n<startMin)continue;
+    for(const col of ["B","K"]){ const cm=str.match(new RegExp('<c r="'+col+n+'"[^>]*?(?:/>|>[\\s\\S]*?</c>)'));
+      if(cm && cm[0].indexOf("/>")<0 && /<(?:v|t|is)\b/.test(cm[0])) lastFilled=Math.max(lastFilled,n); } }
+  const end=Math.max(ccStart+u.cc.length, hdStart+u.hd.length, lastFilled)+2;
+  const CC=["B","C","D","E","F","G","H"], HD=["K","L","M","N","O","P","Q"];
+  const ccF=["hoTen","ngaySinh","gioiTinh","chucVu","tangGiam","lyDo","ghiChu"];
+  const hdF=["hoTen","ngaySinh","gioiTinh","congViec","tangGiam","lyDo","ghiChu"];
+  for(let n=startMin;n<=end;n++){
+    let rowStr = rows.has(n) ? expandRow(rows.get(n),n) : cloneRowStr(rows,n);
+    if(n>=ccStart){const i=n-ccStart;const p=(i>=0&&i<u.cc.length)?u.cc[i]:null;
+      CC.forEach((col,k)=>{rowStr=setCellInRow(rowStr,col,n,p?p[ccF[k]]:"");});}
+    if(n>=hdStart){const i=n-hdStart;const p=(i>=0&&i<u.hd.length)?u.hd[i]:null;
+      HD.forEach((col,k)=>{rowStr=setCellInRow(rowStr,col,n,p?p[hdF[k]]:"");});}
+    rows.set(n,rowStr);
+  }
+  const allN=[...rows.keys()].sort((a,b)=>a-b);
+  const newBody=allN.map(n=>rows.get(n)).join("");
+  return xml.slice(0,sdm.index)+sdm[1]+newBody+sdm[3]+xml.slice(sdm.index+sdm[0].length);
+}
+
+/* ----- Help ----- */
+function renderHelp(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Hướng dẫn nhanh")));
+  const pb=el("div",{class:"pb"});
+  const items=[
+    ["Nạp & cập nhật dữ liệu","Nạp file Excel gốc một lần. Sau đó vào tab Đơn vị để thêm/sửa/xóa người, đánh dấu Tăng/Giảm và chọn Lý do biến động. Tab Tổng hợp tự tính lại ngay."],
+    ["Số nền (C / Biên chế / Số phòng)","Đây là số cố định nhập tay theo từng đơn vị (không suy ra từ danh sách). Sửa trực tiếp trong bảng Tổng hợp nếu cần."],
+    ["Nhắc nghỉ hưu","Nhập ngày nghỉ hưu theo quyết định ở cột “Ngày nghỉ hưu” (tab Đơn vị). Tab Nhắc hưu trí liệt kê theo số ngày còn lại; chỉnh ngưỡng nhắc ở góc phải."],
+    ["Chốt tháng","Tab Lịch sử → “Chốt tháng”: lưu lại tháng cũ (để xuất lại), xóa người đã Giảm, lấy số còn lại làm đầu kỳ tháng mới. Có nút Hoàn tác."],
+    ["Xuất Excel","Tab Xuất Excel: xuất tháng hiện tại hoặc bất kỳ tháng đã chốt. File giữ nguyên công thức tổng hợp + định dạng của file gốc."],
+    ["Lưu trữ trên máy","Dữ liệu tự lưu trên MÁY NÀY khi bạn chỉnh sửa (đóng/mở lại vẫn còn). Để mang sang USB hoặc máy khác/khi máy hỏng: tab Xuất Excel → “Tạo bản sao lưu” (file .ktnnbak), rồi ở máy kia bấm “Phục hồi từ bản sao lưu”. Nút “Nhập file khác” ở góc trên để xóa và làm lại từ đầu."],
+    ["Sắp xếp chức vụ","Danh sách tự sắp theo: Vụ trưởng (gồm Kiểm toán trưởng, Chánh Văn phòng, Chánh Thanh tra, Quyền Vụ trưởng) → Phó Vụ trưởng (gồm Phó Kiểm toán trưởng, Phó Chánh Thanh tra…) → Trưởng phòng → Phó Trưởng phòng → Kiểm toán viên → Chuyên viên. Thêm/đổi chức vụ là tự xếp lại."],
+    ["Lý do tự gán Tăng/Giảm","Chọn Tiếp nhận/Tuyển dụng, Điều động đến, Tăng khác → tự thành Tăng. Chọn Chuyển công tác, Điều động đi, Hưu trí, Nghỉ việc, Giảm khác → tự thành Giảm."],
+    ["Luân chuyển nội bộ","Người Điều động đi/đến: chọn Nơi đến/đi là một đơn vị trong ngành; hệ thống tự thêm người (tên + ngày sinh) sang đơn vị kia và tăng quân số ở đó (dòng “tự động”). Quản lý ở đơn vị nguồn."],
+    ["Nhắc & tự động hưu trí","Nhập ngày nghỉ hưu dd/mm/yyyy. Đến tháng nghỉ hưu, người đó tự chuyển thành Giảm/Hưu trí và thôi nhắc; chốt tháng sẽ tự xóa tên. Người đã Giảm thì không còn nhắc."],
+    ["Hồ sơ","Nhóm “có hồ sơ” = từ Vụ Tổ chức cán bộ đến hết KTNN chuyên ngành VII. Điều động ĐẾN nhóm này từ ngoài → cần NHẬN hồ sơ; điều động ĐI từ nhóm này ra ngoài → cần CHUYỂN hồ sơ; trong nhóm chuyển nhau thì không cần. Bổ nhiệm Phó Kiểm toán trưởng → cần nhận hồ sơ. Việc chưa xử lý hiện cảnh báo (số đỏ ở tab Hồ sơ)."],
+    ["Biên chế dự phòng","Dòng “Dự phòng” ở cả bảng Công chức và Viên chức sửa được trực tiếp; số này được cộng vào tổng biên chế để tính thừa/thiếu."],
+  ];
+  items.forEach(([t,d])=>{const dt=el("details",{class:"help"});dt.appendChild(el("summary",{},t));dt.appendChild(el("div",{class:"hc"},d));pb.appendChild(dt);});
+  pb.appendChild(el("div",{class:"alert info",style:"margin-top:10px"},`Đang dùng file gốc: ${STATE.fileName||"—"} · nạp lúc ${new Date(STATE.importedAt).toLocaleString("vi-VN")}. Muốn đổi khuôn khác? Bấm “Xóa toàn bộ” rồi nạp file mới.`));
+  p.appendChild(pb);frag.appendChild(p);
+  return frag;
+}
+
+/* ----- Modal ----- */
+function modal(title,bodyNode,buttons){
+  const root=$("#modalRoot");
+  const overlay=el("div",{class:"overlay",onclick:e=>{if(e.target===overlay)root.innerHTML="";}});
+  const m=el("div",{class:"modal"});
+  m.appendChild(el("div",{class:"mh"},title));
+  m.appendChild(el("div",{class:"mb"},bodyNode));
+  const mf=el("div",{class:"mf"});
+  buttons.forEach(b=>mf.appendChild(el("button",{class:b.cls,onclick:()=>{root.innerHTML="";if(b.onClick)b.onClick();}},b.label)));
+  m.appendChild(mf);overlay.appendChild(m);root.appendChild(overlay);
+}
+
+/* ===================== Khởi động ===================== */
+$("#fileInput").addEventListener("change",e=>{const f=e.target.files[0];if(f)importFile(f);e.target.value="";});
+$("#btnReset").addEventListener("click",async()=>{
+  if(STATE && DIRTY && !confirm("Bạn có thay đổi chưa Xuất Excel. Vẫn nhập file khác / làm lại?"))return;
+  STATE=null;HISTORY=[];RETIRE_MAP={};ORIGINAL_BUF=null;DIRTY=false;ACTIVE_TAB="dashboard";
+  try{ await kvDel("state");await kvDel("history");await kvDel("retire");await kvDel("originalBuf"); }catch(_){}
+  $("#saveDot").classList.remove("saved");$("#saveText").textContent="Phiên làm việc";
+  render();toast("Đã làm mới. Nạp file để bắt đầu.");
+});
+// Cảnh báo khi đóng/refresh nếu có thay đổi chưa xuất (vì không lưu trên web)
+window.addEventListener("beforeunload",e=>{ if(STATE&&DIRTY){e.preventDefault();e.returnValue="";} });
+(async()=>{ await loadAll(); render(); })();
+</script>
+</body>
+</html>
