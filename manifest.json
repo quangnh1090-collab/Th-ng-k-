@@ -1,7 +1,7 @@
 {
-  "name": "Thống kê nhân sự KTNN theo tháng",
+  "name": "Thống kê nhân sự theo tháng",
   "short_name": "Thống kê NS",
-  "description": "Công cụ thống kê nhân sự theo tháng cho KTNN — chạy offline, lưu trên máy.",
+  "description": "Công cụ thống kê nhân sự theo tháng — chạy offline, lưu trên máy.",
   "lang": "vi",
   "start_url": "./",
   "scope": "./",

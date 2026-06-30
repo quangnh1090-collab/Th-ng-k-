@@ -1,0 +1,52 @@
+========================================================
+ THỐNG KÊ NHÂN SỰ — Cài đặt thành App trên máy tính
+========================================================
+
+BỘ FILE (giữ chung 1 thư mục, KHÔNG đổi tên):
+  - index.html        (app chính)
+  - manifest.json     (mô tả app)
+  - sw.js             (chạy offline + cài đặt)
+  - icon-192.png, icon-512.png (biểu tượng app)
+
+------------------------------------------------------------
+CÁCH 1 (khuyến nghị) — Cài như một App trên Windows, qua GitHub Pages
+------------------------------------------------------------
+PWA chỉ "cài đặt" được khi mở qua một địa chỉ web (https), không chạy được
+khi mở thẳng file. Cách dễ nhất, miễn phí:
+
+1) Vào github.com → New repository (đặt tên tùy ý) → Public.
+2) Add file → Upload files → kéo cả 5 file ở trên vào → Commit.
+3) Settings → Pages → Source: "Deploy from a branch" → branch: main,
+   folder: / (root) → Save.
+4) Chờ ~1 phút, GitHub cho 1 địa chỉ dạng:
+   https://<tên-github>.github.io/<tên-repo>/
+5) Mở địa chỉ đó bằng Microsoft Edge hoặc Chrome.
+   - Trên thanh địa chỉ sẽ có biểu tượng "Cài đặt" (hoặc menu ... → Apps → Install).
+   - Bấm Cài đặt → app có icon riêng trên Desktop/Start Menu, mở full màn hình.
+6) Sau lần mở đầu (có mạng), app đã lưu để chạy OFFLINE các lần sau.
+
+* Riêng tư & dữ liệu:
+  - Địa chỉ web chỉ chứa MÃ của app, KHÔNG chứa dữ liệu. Người lạ mở link chỉ
+    thấy một app TRỐNG (màn hình nạp file), không thấy bất kỳ thông tin nào.
+  - Dữ liệu bạn nhập được lưu NGAY TRÊN MÁY của bạn, KHÔNG gửi đi đâu.
+  - TUYỆT ĐỐI KHÔNG tải file Excel dữ liệu hay file sao lưu (.ktnnbak) lên repo —
+    chỉ tải đúng 5 file app.
+  - Muốn kín hoàn toàn (kể cả app): nhờ IT đặt 5 file lên máy chủ nội bộ, hoặc
+    chạy qua localhost trên máy bạn.
+
+------------------------------------------------------------
+CÁCH 2 — Chỉ dùng nhanh, không cài đặt
+------------------------------------------------------------
+Mở thẳng index.html bằng trình duyệt vẫn dùng được, nhưng có thể KHÔNG cài thành
+app và KHÔNG lưu dữ liệu ổn định (do mở bằng file://). Nếu dùng cách này, sau khi
+làm xong hãy "Tạo bản sao lưu" hoặc "Xuất Excel" để khỏi mất.
+
+------------------------------------------------------------
+DÙNG & SAO LƯU
+------------------------------------------------------------
+- Lần đầu: mở app → Chọn file Excel → nạp file gốc. App tự nhận đơn vị và TỰ LƯU
+  trên máy (góc trên hiện "Đã lưu trên máy này").
+- Chỉnh sửa bình thường, KHÔNG cần bấm lưu — mỗi thay đổi tự lưu.
+- Định kỳ: tab "Xuất Excel" → "Tạo bản sao lưu" → file .ktnnbak → chép vào USB.
+- Sang máy khác / máy hỏng: cài app → "Phục hồi từ bản sao lưu" → chọn file
+  .ktnnbak trong USB → dùng tiếp như cũ.

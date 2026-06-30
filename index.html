@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Thống kê nhân sự KTNN theo tháng</title>
+<title>Thống kê nhân sự theo tháng</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
@@ -144,7 +144,7 @@ details.help li{margin:4px 0}
 <body>
 
 <header class="top">
-  <div class="brand">THỐNG KÊ NHÂN SỰ KTNN<small>Công chức · Viên chức · Lao động hợp đồng — theo tháng</small></div>
+  <div class="brand">THỐNG KÊ NHÂN SỰ<small>Công chức · Viên chức · Lao động hợp đồng — theo tháng</small></div>
   <div class="spacer"></div>
   <div class="status" id="monthStatus"></div>
   <span class="status"><span class="dot" id="saveDot"></span><span id="saveText">Chưa có dữ liệu</span></span>
@@ -188,7 +188,7 @@ function cvRank(t){
   return 6;
 }
 function sortCC(arr){ arr.sort((a,b)=>cvRank(a.chucVu)-cvRank(b.chucVu)); }
-// Nhóm đơn vị "1–17": từ "Vụ Tổ chức cán bộ" đến hết "KTNN chuyên ngành VII"
+// Nhóm đơn vị "1–17": từ "Vụ Tổ chức cán bộ" đến hết "chuyên ngành VII"
 function groupUnitNames(){
   if(!STATE)return [];
   const cc=STATE.units.filter(u=>u.kind!=="VC").map(u=>u.name);
@@ -488,7 +488,7 @@ function renderHoSo(){
   const warn=incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;
   const top=el("div",{class:"panel"});
   top.appendChild(el("div",{class:"ph"},el("h2",{},"Quản lý hồ sơ điều động / bổ nhiệm"),
-    el("span",{class:"sub"},"Nhóm có hồ sơ: từ Vụ Tổ chức cán bộ đến hết KTNN chuyên ngành VII")));
+    el("span",{class:"sub"},"Nhóm có hồ sơ: từ Vụ Tổ chức cán bộ đến hết chuyên ngành VII")));
   const msg = warn>0
     ? el("div",{class:"alert",style:"background:#fff4e5;border:1px solid #ffb648;color:#8a4b00"}, "⚠ Còn "+warn+" hồ sơ chưa xử lý (xem danh sách bên dưới).")
     : el("div",{class:"alert info"}, "✔ Tất cả hồ sơ đã được xử lý.");
@@ -1020,7 +1020,7 @@ function b64ToBuf(b64){
 function exportBackup(){
   if(!STATE){alert("Chưa có dữ liệu để sao lưu.");return;}
   toast("Đang tạo bản sao lưu…");
-  const data={ _type:"KTNN_THONGKE_BACKUP", v:2, savedAt:Date.now(),
+  const data={ _type:"THONGKE_NS_BACKUP", v:2, savedAt:Date.now(),
     state:STATE, history:HISTORY, retire:RETIRE_MAP,
     originalB64: ORIGINAL_BUF? bufToB64(ORIGINAL_BUF): null };
   const blob=new Blob([JSON.stringify(data)],{type:"application/octet-stream"});
@@ -1035,7 +1035,7 @@ async function restoreBackup(file){
   try{
     const text=await file.text();
     const d=JSON.parse(text);
-    if(d._type!=="KTNN_THONGKE_BACKUP"||!d.state) throw new Error("Sai định dạng");
+    if(d._type!=="THONGKE_NS_BACKUP"||!d.state) throw new Error("Sai định dạng");
     STATE=d.state; HISTORY=d.history||[]; RETIRE_MAP=d.retire||{};
     ORIGINAL_BUF=d.originalB64? b64ToBuf(d.originalB64): null;
     if(!STATE._group) STATE._group=groupUnitNames();
@@ -1206,7 +1206,7 @@ function renderHelp(){
     ["Lý do tự gán Tăng/Giảm","Chọn Tiếp nhận/Tuyển dụng, Điều động đến, Tăng khác → tự thành Tăng. Chọn Chuyển công tác, Điều động đi, Hưu trí, Nghỉ việc, Giảm khác → tự thành Giảm."],
     ["Luân chuyển nội bộ","Người Điều động đi/đến: chọn Nơi đến/đi là một đơn vị trong ngành; hệ thống tự thêm người (tên + ngày sinh) sang đơn vị kia và tăng quân số ở đó (dòng “tự động”). Quản lý ở đơn vị nguồn."],
     ["Nhắc & tự động hưu trí","Nhập ngày nghỉ hưu dd/mm/yyyy. Đến tháng nghỉ hưu, người đó tự chuyển thành Giảm/Hưu trí và thôi nhắc; chốt tháng sẽ tự xóa tên. Người đã Giảm thì không còn nhắc."],
-    ["Hồ sơ","Nhóm “có hồ sơ” = từ Vụ Tổ chức cán bộ đến hết KTNN chuyên ngành VII. Điều động ĐẾN nhóm này từ ngoài → cần NHẬN hồ sơ; điều động ĐI từ nhóm này ra ngoài → cần CHUYỂN hồ sơ; trong nhóm chuyển nhau thì không cần. Bổ nhiệm Phó Kiểm toán trưởng → cần nhận hồ sơ. Việc chưa xử lý hiện cảnh báo (số đỏ ở tab Hồ sơ)."],
+    ["Hồ sơ","Nhóm “có hồ sơ” = từ Vụ Tổ chức cán bộ đến hết chuyên ngành VII. Điều động ĐẾN nhóm này từ ngoài → cần NHẬN hồ sơ; điều động ĐI từ nhóm này ra ngoài → cần CHUYỂN hồ sơ; trong nhóm chuyển nhau thì không cần. Bổ nhiệm Phó Kiểm toán trưởng → cần nhận hồ sơ. Việc chưa xử lý hiện cảnh báo (số đỏ ở tab Hồ sơ)."],
     ["Biên chế dự phòng","Dòng “Dự phòng” ở cả bảng Công chức và Viên chức sửa được trực tiếp; số này được cộng vào tổng biên chế để tính thừa/thiếu."],
   ];
   items.forEach(([t,d])=>{const dt=el("details",{class:"help"});dt.appendChild(el("summary",{},t));dt.appendChild(el("div",{class:"hc"},d));pb.appendChild(dt);});
