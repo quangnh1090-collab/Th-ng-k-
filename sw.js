@@ -1,5 +1,5 @@
 // Service worker: cài đặt như app & chạy offline
-const CACHE = "ktnn-thongke-v1";
+const CACHE = "thongke-ns-v3";
 const SHELL = [
   "./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png",
   "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js",

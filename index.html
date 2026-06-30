@@ -466,6 +466,7 @@ function collectHoSo(){
   if(!STATE)return {incoming,outgoing};
   STATE.units.forEach(u=>u.cc.forEach(p=>{
     if(p._mirror)return;
+    const here=inGroup(u.name);
     if(isTransferReason(p.lyDo)&&p._destUnit){
       const from = p.lyDo==="Điều động đi"? u.name : p._destUnit;
       const to   = p.lyDo==="Điều động đi"? p._destUnit : u.name;
@@ -473,6 +474,16 @@ function collectHoSo(){
         incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đến từ ngoài nhóm",done:!!p._hoSoNop,kind:"nop"});
       else if(inGroup(from)&&!inGroup(to))
         outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đi ra ngoài nhóm",done:!!p._hoSoChuyen,kind:"chuyen"});
+    }
+    // Tiếp nhận / Tuyển dụng vào đơn vị trong nhóm -> phải THU hồ sơ (nộp về)
+    if(here && p.lyDo==="Tiếp nhận / Tuyển dụng" && p.tangGiam!=="Giảm"){
+      if(!incoming.some(it=>it.p===p))
+        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Tiếp nhận / Tuyển dụng vào nhóm",done:!!p._hoSoNop,kind:"nop"});
+    }
+    // Chuyển công tác từ đơn vị trong nhóm -> phải BÀN GIAO hồ sơ đi
+    if(here && p.lyDo==="Chuyển công tác"){
+      if(!outgoing.some(it=>it.p===p))
+        outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"—",reason:"Chuyển công tác (bàn giao hồ sơ)",done:!!p._hoSoChuyen,kind:"chuyen"});
     }
     if(cvNorm(p.chucVu)==="phó kiểm toán trưởng" && p.tangGiam==="Tăng"){
       if(!incoming.some(it=>it.p===p))
@@ -1047,9 +1058,11 @@ async function restoreBackup(file){
   }catch(e){ alert("Không đọc được bản sao lưu. File có thể bị hỏng hoặc không đúng định dạng .ktnnbak"); console.error(e); }
 }
 function exportMonth(h){ doExport(h.snapshot, h.month); }
+function exportCurrent(){ doExport({trackingMonth:STATE.trackingMonth,units:STATE.units}, STATE.trackingMonth); }
 
 async function doExport(snap, month){
-  if(!ORIGINAL_BUF){alert("Thiếu file gốc làm khuôn. Hãy nạp lại file Excel gốc.");return;}
+  if(!ORIGINAL_BUF){alert("Thiếu file gốc làm khuôn. Hãy nạp lại file Excel gốc (hoặc Phục hồi từ bản sao lưu).");return;}
+  if(typeof JSZip==="undefined"||typeof XLSX==="undefined"){alert("Chưa tải được thư viện xử lý Excel. Hãy mở app khi có mạng một lần để tải, rồi thử lại.");return;}
   rebuildTransfers();
   toast("Đang tạo file Excel…");
   try{
@@ -1100,7 +1113,9 @@ async function doExport(snap, month){
     const a=document.createElement("a");
     a.href=URL.createObjectURL(out);
     a.download=`ThongKe_NhanSu_${month}.xlsx`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     setTimeout(()=>URL.revokeObjectURL(a.href),4000);
     toast(`Đã tạo file ${a.download} (${done} đơn vị)`);
   }catch(e){console.error(e);alert("Lỗi khi xuất Excel: "+e.message);}
@@ -1206,7 +1221,7 @@ function renderHelp(){
     ["Lý do tự gán Tăng/Giảm","Chọn Tiếp nhận/Tuyển dụng, Điều động đến, Tăng khác → tự thành Tăng. Chọn Chuyển công tác, Điều động đi, Hưu trí, Nghỉ việc, Giảm khác → tự thành Giảm."],
     ["Luân chuyển nội bộ","Người Điều động đi/đến: chọn Nơi đến/đi là một đơn vị trong ngành; hệ thống tự thêm người (tên + ngày sinh) sang đơn vị kia và tăng quân số ở đó (dòng “tự động”). Quản lý ở đơn vị nguồn."],
     ["Nhắc & tự động hưu trí","Nhập ngày nghỉ hưu dd/mm/yyyy. Đến tháng nghỉ hưu, người đó tự chuyển thành Giảm/Hưu trí và thôi nhắc; chốt tháng sẽ tự xóa tên. Người đã Giảm thì không còn nhắc."],
-    ["Hồ sơ","Nhóm “có hồ sơ” = từ Vụ Tổ chức cán bộ đến hết chuyên ngành VII. Điều động ĐẾN nhóm này từ ngoài → cần NHẬN hồ sơ; điều động ĐI từ nhóm này ra ngoài → cần CHUYỂN hồ sơ; trong nhóm chuyển nhau thì không cần. Bổ nhiệm Phó Kiểm toán trưởng → cần nhận hồ sơ. Việc chưa xử lý hiện cảnh báo (số đỏ ở tab Hồ sơ)."],
+    ["Hồ sơ","Nhóm “có hồ sơ” = từ Vụ Tổ chức cán bộ đến hết chuyên ngành VII. CẦN THU (nộp về): điều động ĐẾN nhóm từ ngoài; Tiếp nhận/Tuyển dụng vào nhóm; bổ nhiệm Phó Kiểm toán trưởng. CẦN BÀN GIAO (chuyển đi): điều động ĐI từ nhóm ra ngoài; Chuyển công tác từ đơn vị trong nhóm. Trong nhóm chuyển nhau thì không cần. Việc chưa xử lý hiện cảnh báo (số đỏ ở tab Hồ sơ)."],
     ["Biên chế dự phòng","Dòng “Dự phòng” ở cả bảng Công chức và Viên chức sửa được trực tiếp; số này được cộng vào tổng biên chế để tính thừa/thiếu."],
   ];
   items.forEach(([t,d])=>{const dt=el("details",{class:"help"});dt.appendChild(el("summary",{},t));dt.appendChild(el("div",{class:"hc"},d));pb.appendChild(dt);});
