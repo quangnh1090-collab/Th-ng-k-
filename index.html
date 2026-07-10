@@ -70,10 +70,18 @@ main{padding:18px;max-width:1500px;margin:0 auto}
 .dropzone p{color:var(--muted);margin:4px 0 16px}
 
 /* Tables */
-.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius)}
-table{border-collapse:collapse;width:100%;font-size:13px;background:#fff}
-th,td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
-thead th{background:#eef1f4;position:sticky;top:0;z-index:2;font-size:12px;color:#3a4756;white-space:nowrap}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:var(--radius);max-height:70vh}
+table{border-collapse:separate;border-spacing:0;width:100%;font-size:13px;background:#fff}
+th,td{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:middle}
+th:first-child,td:first-child{border-left:1px solid var(--line)}
+thead th{background:#eef1f4;position:sticky;top:0;z-index:3;font-size:12px;color:#3a4756;line-height:1.25;border-top:1px solid var(--line)}
+thead th.wrap-h{white-space:normal;min-width:74px;max-width:110px}
+/* Ghim 2 cột đầu (STT, Đơn vị) khi cuộn ngang */
+.sum-table td:nth-child(1),.sum-table th:nth-child(1){position:sticky;left:0;z-index:2;background:#fff;width:44px}
+.sum-table td:nth-child(2),.sum-table th:nth-child(2){position:sticky;left:44px;z-index:2;background:#fff;min-width:190px;box-shadow:1px 0 0 var(--line)}
+.sum-table thead th:nth-child(1),.sum-table thead th:nth-child(2){z-index:4;background:#eef1f4}
+.sum-table tr.total-row td:nth-child(1),.sum-table tr.total-row td:nth-child(2){background:#f0eaea}
+.sum-table tbody tr:hover td:nth-child(1),.sum-table tbody tr:hover td:nth-child(2){background:#fafbfc}
 tbody tr:hover{background:#fafbfc}
 td.num,th.num{text-align:center;font-variant-numeric:tabular-nums}
 .sum-table td.num{font-weight:600}
@@ -515,7 +523,7 @@ function hoSoTable(title,items,kind,doneLabel){
   p.appendChild(el("div",{class:"ph"},el("h2",{},title)));
   const wrap=el("div",{class:"table-wrap"});
   const tbl=el("table",{});
-  const thead=el("tr",{});["#","Họ và tên","Ngày sinh","Từ → Đến","Lý do","Trạng thái"].forEach(c=>thead.appendChild(el("th",{},c)));
+  const thead=el("tr",{});["STT","Họ và tên","Ngày sinh","Từ đơn vị → Đến đơn vị","Lý do","Trạng thái xử lý"].forEach(c=>thead.appendChild(el("th",{},c)));
   tbl.appendChild(el("thead",{},thead));
   const tb=el("tbody",{});
   if(!items.length){
@@ -634,7 +642,7 @@ function renderSearch(){
     resultBox.appendChild(el("div",{class:"mini",style:"margin-bottom:6px"},"Tìm thấy "+rows.length+" người đang làm việc"+(ret.length?" và "+ret.length+" người đã nghỉ hưu":"")));
     if(rows.length){
       const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
-      const th=el("tr",{});["#","Họ và tên","Ngày sinh","GT","Đơn vị","Chức vụ","Diện","Biến động"].forEach(c=>th.appendChild(el("th",{},c)));
+      const th=el("tr",{});["STT","Họ và tên","Ngày sinh","Giới tính","Đơn vị","Chức vụ","Diện nhân sự","Biến động trong tháng"].forEach(c=>th.appendChild(el("th",{},c)));
       tbl.appendChild(el("thead",{},th));
       const tb=el("tbody",{});
       rows.forEach((r,i)=>{
@@ -658,7 +666,7 @@ function renderSearch(){
     if(ret.length){
       resultBox.appendChild(el("div",{class:"mini",style:"margin:12px 0 6px;font-weight:700"},"Đã nghỉ hưu"));
       const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
-      const th=el("tr",{});["#","Họ và tên","Ngày sinh","Đơn vị","Chức vụ","Ngày nghỉ hưu"].forEach(c=>th.appendChild(el("th",{},c)));
+      const th=el("tr",{});["STT","Họ và tên","Ngày sinh","Đơn vị","Chức vụ","Ngày nghỉ hưu"].forEach(c=>th.appendChild(el("th",{},c)));
       tbl.appendChild(el("thead",{},th));const tb=el("tbody",{});
       ret.forEach((r,i)=>{const tr=el("tr",{});tr.style.background="#f6f8fb";
         tr.appendChild(el("td",{class:"num"},String(i+1)));
@@ -698,7 +706,7 @@ function renderSearch(){
     }
     rpb.appendChild(el("div",{class:"mini",style:"margin:14px 0 6px;font-weight:700"},"Danh sách chi tiết"));
     const w2=el("div",{class:"table-wrap"});const t2=el("table",{});
-    const h2=el("tr",{});["#","Họ và tên","Ngày sinh","GT","Đơn vị","Chức vụ","Ngày nghỉ hưu","Tháng ghi nhận"].forEach(c=>h2.appendChild(el("th",{},c)));
+    const h2=el("tr",{});["STT","Họ và tên","Ngày sinh","Giới tính","Đơn vị","Chức vụ","Ngày nghỉ hưu","Tháng ghi nhận"].forEach(c=>h2.appendChild(el("th",{},c)));
     t2.appendChild(el("thead",{},h2));const b2=el("tbody",{});
     st.list.forEach((r,i)=>{
       const tr=el("tr",{});
@@ -816,13 +824,13 @@ function summaryTable(title,units,tot,showTotal,reserve,reserveKey){
   const tbl=el("table",{class:"sum-table"});
   const head=[
     ["STT",""],["Đơn vị",""],
-    ["Đầu kỳ","Số có mặt đầu kỳ"],["Hiện tại","Số có mặt hiện tại"],["Biên chế","Biên chế giao"],["±","Thừa(+)/Thiếu(-) = Hiện tại − Biên chế"],
-    ["TN/TD","Tiếp nhận / Tuyển dụng"],["ĐĐ đến","Điều động đến"],["Tăng khác",""],["Chuyển CT","Chuyển công tác"],["ĐĐ đi","Điều động đi"],["Hưu trí",""],["Giảm khác",""],
-    ["Vụ tr.","Vụ trưởng và tương đương"],["Hàm Vtr","Hàm Vụ trưởng / Quyền Vụ trưởng"],["P.Vtr","Phó Vụ trưởng và tương đương"],["CT LĐ","Chỉ tiêu lãnh đạo = Phó Vụ trưởng − 3"],
-    ["Phòng","Số phòng"],["TP","Trưởng phòng"],["PTP","Phó Trưởng phòng"],["TP-CT","Chỉ tiêu TP = Trưởng phòng − Số phòng"],["PTP-CT","Chỉ tiêu PTP = Phó TP − Số phòng×2"],
-    ["Biệt phái","Công chức biệt phái"],["HĐ","Lao động hợp đồng"]
+    ["Số có mặt đầu kỳ","Số người có mặt tại thời điểm đầu kỳ"],["Số có mặt hiện tại","Đầu kỳ + Tăng − Giảm"],["Biên chế được giao",""],["Thừa (+) / Thiếu (−)","Số có mặt hiện tại − Biên chế được giao"],
+    ["Tiếp nhận / Tuyển dụng",""],["Điều động đến",""],["Tăng khác",""],["Chuyển công tác",""],["Điều động đi",""],["Hưu trí",""],["Giảm khác",""],
+    ["Vụ trưởng","Vụ trưởng và tương đương (Kiểm toán trưởng, Chánh Văn phòng, Chánh Thanh tra…)"],["Hàm Vụ trưởng","Hàm Vụ trưởng / Quyền Vụ trưởng"],["Phó Vụ trưởng","Phó Vụ trưởng và tương đương (Phó Kiểm toán trưởng, Phó Chánh Thanh tra…)"],["Chỉ tiêu lãnh đạo","Thừa(+)/Thiếu(−) = Phó Vụ trưởng − 3"],
+    ["Số phòng",""],["Trưởng phòng",""],["Phó Trưởng phòng",""],["Chỉ tiêu Trưởng phòng","Thừa(+)/Thiếu(−) = Trưởng phòng − Số phòng"],["Chỉ tiêu Phó Trưởng phòng","Thừa(+)/Thiếu(−) = Phó Trưởng phòng − Số phòng × 2"],
+    ["Công chức biệt phái",""],["Lao động hợp đồng",""]
   ];
-  const thead=el("tr",{});head.forEach((h,i)=>thead.appendChild(el("th",{class:i>=2?"num":"",title:h[1]||null},h[0])));
+  const thead=el("tr",{});head.forEach((h,i)=>thead.appendChild(el("th",{class:(i>=2?"num wrap-h":""),title:h[1]||null},h[0])));
   tbl.appendChild(el("thead",{},thead));
   const tb=el("tbody",{});
   const blank=()=>el("td",{class:"num",style:"color:var(--muted)"},"—");
@@ -954,8 +962,8 @@ function personTable(u,which){
   const wrap=el("div",{class:"table-wrap"});
   const tbl=el("table",{});
   const cols=isCC
-    ? ["#","Họ và tên","Ngày sinh","GT","Chức vụ","Tăng/Giảm","Lý do biến động","Nơi đến/đi","Ngày nghỉ hưu","Ghi chú",""]
-    : ["#","Họ và tên","Ngày sinh","GT","Chức vụ / Công việc","Tăng/Giảm","Lý do biến động","Ghi chú",""];
+    ? ["STT","Họ và tên","Ngày sinh","Giới tính","Chức vụ","Tăng / Giảm","Lý do biến động","Nơi đến / nơi đi","Ngày nghỉ hưu","Ghi chú","Thao tác"]
+    : ["STT","Họ và tên","Ngày sinh","Giới tính","Chức vụ / Công việc","Tăng / Giảm","Lý do biến động","Ghi chú","Thao tác"];
   const thead=el("tr",{});cols.forEach(c=>thead.appendChild(el("th",{},c)));
   tbl.appendChild(el("thead",{},thead));
   const tb=el("tbody",{});
