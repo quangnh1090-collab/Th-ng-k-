@@ -553,12 +553,186 @@ function render(){
   if(!STATE){ v.appendChild(renderImport()); return; }
   if(ACTIVE_TAB==="dashboard") v.appendChild(renderDashboard());
   else if(ACTIVE_TAB==="units") v.appendChild(renderUnits());
+  else if(ACTIVE_TAB==="search") v.appendChild(renderSearch());
   else if(ACTIVE_TAB==="retire") v.appendChild(renderRetire());
   else if(ACTIVE_TAB==="hoso") v.appendChild(renderHoSo());
   else if(ACTIVE_TAB==="history") v.appendChild(renderHistory());
   else if(ACTIVE_TAB==="export") v.appendChild(renderExport());
   else if(ACTIVE_TAB==="help") v.appendChild(renderHelp());
 }
+/* ===================== Tra cứu người & Thống kê đã nghỉ hưu ===================== */
+function stripAccent(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").toLowerCase().trim();}
+// Tất cả người đang làm việc (bỏ dòng tự động)
+function allPeople(){
+  const out=[];
+  if(!STATE)return out;
+  STATE.units.forEach(u=>{
+    u.cc.forEach(p=>{ if(!p._mirror) out.push({p,unit:u.name,kind:u.kind==="VC"?"Viên chức":"Công chức",loai:"cc"}); });
+    (u.hd||[]).forEach(p=>out.push({p,unit:u.name,kind:"Lao động HĐ",loai:"hd"}));
+  });
+  return out;
+}
+function searchPeople(q){
+  const k=stripAccent(q);
+  if(!k)return [];
+  return allPeople().filter(r=>stripAccent(r.p.hoTen).includes(k));
+}
+/* ---- Thống kê người đã nghỉ hưu ---- */
+// Gồm: (1) đã lưu trữ khi chốt tháng, (2) đang đánh Giảm/Hưu trí ở tháng hiện tại
+function retiredList(){
+  if(!STATE)return [];
+  const out=[];
+  (STATE.retired||[]).forEach(r=>out.push(Object.assign({daChot:true},r)));
+  STATE.units.forEach(u=>u.cc.forEach(p=>{
+    if(p._mirror)return;
+    if(p.tangGiam==="Giảm"&&p.lyDo==="Hưu trí")
+      out.push({daChot:false,hoTen:p.hoTen,ngaySinh:p.ngaySinh,gioiTinh:p.gioiTinh,chucVu:p.chucVu,
+                unit:u.name,lyDo:"Hưu trí",retireDate:p.retireDate||"",month:STATE.trackingMonth,ghiChu:p.ghiChu||""});
+  }));
+  out.sort((a,b)=>{
+    const da=parseVNDate(a.retireDate), db=parseVNDate(b.retireDate);
+    if(da&&db)return db-da;              // mới nghỉ trước
+    return String(b.month).localeCompare(String(a.month));
+  });
+  return out;
+}
+function retiredStats(){
+  const list=retiredList();
+  const byYear={}, byUnit={}, byGender={Nam:0,"Nữ":0,"—":0};
+  list.forEach(r=>{
+    const d=parseVNDate(r.retireDate);
+    const y=d? d.getFullYear() : (r.month? r.month.split("-")[0] : "?");
+    byYear[y]=(byYear[y]||0)+1;
+    byUnit[r.unit]=(byUnit[r.unit]||0)+1;
+    const g=r.gioiTinh==="Nam"?"Nam":(r.gioiTinh==="Nữ"?"Nữ":"—");
+    byGender[g]++;
+  });
+  return {total:list.length, byYear, byUnit, byGender, list};
+}
+let SEARCH_Q="";
+function renderSearch(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Tra cứu cán bộ"),
+    el("span",{class:"sub"},"Gõ tên (không cần dấu) để tìm ngày sinh, đơn vị")));
+  const pb=el("div",{class:"pb"});
+  const box=el("input",{class:"cell-input",style:"max-width:420px;font-size:15px;padding:9px 12px",
+    placeholder:"Nhập tên cần tìm, ví dụ: nguyen van a",value:SEARCH_Q});
+  box.addEventListener("input",()=>{SEARCH_Q=box.value;drawResult();});
+  pb.appendChild(el("div",{class:"row"},box));
+  const resultBox=el("div",{style:"margin-top:12px"});
+  pb.appendChild(resultBox);
+  p.appendChild(pb);frag.appendChild(p);
+
+  function drawResult(){
+    resultBox.innerHTML="";
+    const q=SEARCH_Q.trim();
+    if(!q){ resultBox.appendChild(el("div",{class:"mini"},"Tổng số người trong dữ liệu: "+allPeople().length)); return; }
+    const rows=searchPeople(q);
+    const ret=retiredList().filter(r=>stripAccent(r.hoTen).includes(stripAccent(q)));
+    if(!rows.length&&!ret.length){ resultBox.appendChild(el("div",{class:"alert warn"},"Không tìm thấy ai có tên chứa “"+q+"”.")); return; }
+    resultBox.appendChild(el("div",{class:"mini",style:"margin-bottom:6px"},"Tìm thấy "+rows.length+" người đang làm việc"+(ret.length?" và "+ret.length+" người đã nghỉ hưu":"")));
+    if(rows.length){
+      const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
+      const th=el("tr",{});["#","Họ và tên","Ngày sinh","GT","Đơn vị","Chức vụ","Diện","Biến động"].forEach(c=>th.appendChild(el("th",{},c)));
+      tbl.appendChild(el("thead",{},th));
+      const tb=el("tbody",{});
+      rows.forEach((r,i)=>{
+        const tr=el("tr",{});
+        tr.appendChild(el("td",{class:"num"},String(i+1)));
+        tr.appendChild(el("td",{},el("strong",{},r.p.hoTen||"(trống)")));
+        tr.appendChild(el("td",{},r.p.ngaySinh||""));
+        tr.appendChild(el("td",{},r.p.gioiTinh||""));
+        tr.appendChild(el("td",{},el("a",{href:"#",onclick:e=>{e.preventDefault();ACTIVE_UNIT=STATE.units.findIndex(u=>u.name===r.unit);ACTIVE_TAB="units";render();}},r.unit)));
+        tr.appendChild(el("td",{},r.p.chucVu||r.p.congViec||""));
+        tr.appendChild(el("td",{class:"mini"},r.kind));
+        const bd=el("td",{});
+        if(r.p.tangGiam==="Tăng")bd.appendChild(el("span",{class:"pill tang"},"Tăng"));
+        else if(r.p.tangGiam==="Giảm")bd.appendChild(el("span",{class:"pill giam"},"Giảm"));
+        if(r.p.lyDo)bd.appendChild(el("span",{class:"mini",style:"margin-left:6px"},r.p.lyDo));
+        tr.appendChild(bd);
+        tb.appendChild(tr);
+      });
+      tbl.appendChild(tb);wrap.appendChild(tbl);resultBox.appendChild(wrap);
+    }
+    if(ret.length){
+      resultBox.appendChild(el("div",{class:"mini",style:"margin:12px 0 6px;font-weight:700"},"Đã nghỉ hưu"));
+      const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
+      const th=el("tr",{});["#","Họ và tên","Ngày sinh","Đơn vị","Chức vụ","Ngày nghỉ hưu"].forEach(c=>th.appendChild(el("th",{},c)));
+      tbl.appendChild(el("thead",{},th));const tb=el("tbody",{});
+      ret.forEach((r,i)=>{const tr=el("tr",{});tr.style.background="#f6f8fb";
+        tr.appendChild(el("td",{class:"num"},String(i+1)));
+        tr.appendChild(el("td",{},r.hoTen||""));
+        tr.appendChild(el("td",{},r.ngaySinh||""));
+        tr.appendChild(el("td",{},r.unit||""));
+        tr.appendChild(el("td",{},r.chucVu||""));
+        tr.appendChild(el("td",{},r.retireDate||monthLabel(r.month)));
+        tb.appendChild(tr);});
+      tbl.appendChild(tb);wrap.appendChild(tbl);resultBox.appendChild(wrap);
+    }
+  }
+  drawResult();
+
+  // ---- Thống kê người đã nghỉ hưu ----
+  const st=retiredStats();
+  const rp=el("div",{class:"panel"});
+  rp.appendChild(el("div",{class:"ph"},el("h2",{},"Thống kê người đã nghỉ hưu"),
+    el("span",{class:"sub"},"Gồm người đã chốt tháng và người đang đánh Hưu trí ở tháng này")));
+  const rpb=el("div",{class:"pb"});
+  if(!st.total){
+    rpb.appendChild(el("div",{class:"alert info"},"Chưa có ai nghỉ hưu được ghi nhận. Người nghỉ hưu sẽ được lưu lại khi bạn bấm “Chốt tháng”."));
+  }else{
+    rpb.appendChild(el("div",{class:"kpi"},
+      card("Tổng đã nghỉ hưu",String(st.total),"accent"),
+      card("Nam",String(st.byGender.Nam)),
+      card("Nữ",String(st.byGender["Nữ"])),
+      card("Số đơn vị có người nghỉ",String(Object.keys(st.byUnit).length))));
+    const years=Object.keys(st.byYear).sort();
+    if(years.length){
+      rpb.appendChild(el("div",{class:"mini",style:"margin:14px 0 6px;font-weight:700"},"Theo năm nghỉ hưu"));
+      const w1=el("div",{class:"table-wrap"});const t1=el("table",{});
+      const h1=el("tr",{});["Năm","Số người"].forEach(c=>h1.appendChild(el("th",{},c)));
+      t1.appendChild(el("thead",{},h1));const b1=el("tbody",{});
+      years.forEach(y=>{const tr=el("tr",{});tr.appendChild(el("td",{},String(y)));tr.appendChild(numCell(st.byYear[y]));b1.appendChild(tr);});
+      t1.appendChild(b1);w1.appendChild(t1);rpb.appendChild(w1);
+    }
+    rpb.appendChild(el("div",{class:"mini",style:"margin:14px 0 6px;font-weight:700"},"Danh sách chi tiết"));
+    const w2=el("div",{class:"table-wrap"});const t2=el("table",{});
+    const h2=el("tr",{});["#","Họ và tên","Ngày sinh","GT","Đơn vị","Chức vụ","Ngày nghỉ hưu","Tháng ghi nhận"].forEach(c=>h2.appendChild(el("th",{},c)));
+    t2.appendChild(el("thead",{},h2));const b2=el("tbody",{});
+    st.list.forEach((r,i)=>{
+      const tr=el("tr",{});
+      if(!r.daChot) tr.style.background="#fff7ed";
+      tr.appendChild(el("td",{class:"num"},String(i+1)));
+      tr.appendChild(el("td",{},el("strong",{},r.hoTen||"")));
+      tr.appendChild(el("td",{},r.ngaySinh||""));
+      tr.appendChild(el("td",{},r.gioiTinh||""));
+      tr.appendChild(el("td",{},r.unit||""));
+      tr.appendChild(el("td",{},r.chucVu||""));
+      tr.appendChild(el("td",{},r.retireDate||""));
+      tr.appendChild(el("td",{class:"mini"},monthLabel(r.month)+(r.daChot?"":" (chưa chốt)")));
+      b2.appendChild(tr);
+    });
+    t2.appendChild(b2);w2.appendChild(t2);rpb.appendChild(w2);
+    rpb.appendChild(el("div",{class:"row",style:"margin-top:12px"},
+      el("button",{class:"btn",onclick:()=>exportRetiredCSV()},"⬇ Tải danh sách nghỉ hưu (CSV)")));
+  }
+  rp.appendChild(rpb);frag.appendChild(rp);
+  return frag;
+}
+function exportRetiredCSV(){
+  const list=retiredList();
+  if(!list.length){alert("Chưa có dữ liệu người nghỉ hưu.");return;}
+  const head=["STT","Ho va ten","Ngay sinh","Gioi tinh","Don vi","Chuc vu","Ngay nghi huu","Thang ghi nhan"];
+  const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const rows=list.map((r,i)=>[i+1,r.hoTen,r.ngaySinh,r.gioiTinh,r.unit,r.chucVu,r.retireDate,r.month].map(esc).join(","));
+  const csv="\uFEFF"+head.map(esc).join(",")+"\n"+rows.join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=el("a",{href:URL.createObjectURL(blob),download:"DanhSach_NghiHuu.csv"});
+  document.body.appendChild(a);a.click();a.remove();
+  toast("Đã tải danh sách nghỉ hưu");
+}
+
 function renderTabs(){
   const tabs=$("#tabs"); tabs.innerHTML="";
   if(!STATE)return;
@@ -567,6 +741,7 @@ function renderTabs(){
   const defs=[
     ["dashboard","Tổng hợp"],
     ["units","Đơn vị"],
+    ["search","Tra cứu"],
     ["retire","Nhắc hưu trí",due],
     ["hoso","Hồ sơ",hoso||null,"red"],
     ["history","Lịch sử tháng",HISTORY.length||null,"gray"],
@@ -959,7 +1134,17 @@ function doCloseMonth(){
   STATE.units.forEach(u=>u.cc.forEach(p=>{ delete p._mirror; delete p._destUnit; }));
   // 1) lưu snapshot tháng hiện tại
   HISTORY.push(snapshotCurrent());
-  // 2) xóa người Giảm, reset biến động, đặt đầu kỳ = số còn lại
+  // 2) LƯU TRỮ người sẽ bị xóa (nghỉ hưu & các trường hợp giảm khác) trước khi xóa
+  if(!STATE.retired) STATE.retired=[];
+  if(!STATE.leftArchive) STATE.leftArchive=[];
+  const m=STATE.trackingMonth;
+  STATE.units.forEach(u=>u.cc.forEach(p=>{
+    if(p.tangGiam!=="Giảm")return;
+    const rec={hoTen:p.hoTen,ngaySinh:p.ngaySinh,gioiTinh:p.gioiTinh,chucVu:p.chucVu,
+               unit:u.name,lyDo:p.lyDo||"",retireDate:p.retireDate||"",month:m,ghiChu:p.ghiChu||""};
+    if(p.lyDo==="Hưu trí") STATE.retired.push(rec); else STATE.leftArchive.push(rec);
+  }));
+  // 3) xóa người Giảm, reset biến động, đặt đầu kỳ = số còn lại
   STATE.units.forEach(u=>{
     u.cc=u.cc.filter(p=>p.tangGiam!=="Giảm");
     u.hd=u.hd.filter(p=>p.tangGiam!=="Giảm");
@@ -1217,6 +1402,7 @@ function renderHelp(){
     ["Chốt tháng","Tab Lịch sử → “Chốt tháng”: lưu lại tháng cũ (để xuất lại), xóa người đã Giảm, lấy số còn lại làm đầu kỳ tháng mới. Có nút Hoàn tác."],
     ["Xuất Excel","Tab Xuất Excel: xuất tháng hiện tại hoặc bất kỳ tháng đã chốt. File giữ nguyên công thức tổng hợp + định dạng của file gốc."],
     ["Lưu trữ trên máy","Dữ liệu tự lưu trên MÁY NÀY khi bạn chỉnh sửa (đóng/mở lại vẫn còn). Để mang sang USB hoặc máy khác/khi máy hỏng: tab Xuất Excel → “Tạo bản sao lưu” (file .ktnnbak), rồi ở máy kia bấm “Phục hồi từ bản sao lưu”. Nút “Nhập file khác” ở góc trên để xóa và làm lại từ đầu."],
+    ["Tra cứu & Nghỉ hưu","Tab “Tra cứu”: gõ tên (không cần dấu) để tìm nhanh ngày sinh, đơn vị, chức vụ; bấm tên đơn vị để nhảy tới danh sách đó. Cùng tab có bảng “Thống kê người đã nghỉ hưu” (tổng số, theo năm, theo giới) và nút tải danh sách ra CSV. Người nghỉ hưu được LƯU LẠI khi bấm Chốt tháng, nên không mất sau khi xóa khỏi danh sách."],
     ["Sắp xếp chức vụ","Danh sách tự sắp theo: Vụ trưởng (gồm Kiểm toán trưởng, Chánh Văn phòng, Chánh Thanh tra, Quyền Vụ trưởng) → Phó Vụ trưởng (gồm Phó Kiểm toán trưởng, Phó Chánh Thanh tra…) → Trưởng phòng → Phó Trưởng phòng → Kiểm toán viên → Chuyên viên. Thêm/đổi chức vụ là tự xếp lại."],
     ["Lý do tự gán Tăng/Giảm","Chọn Tiếp nhận/Tuyển dụng, Điều động đến, Tăng khác → tự thành Tăng. Chọn Chuyển công tác, Điều động đi, Hưu trí, Nghỉ việc, Giảm khác → tự thành Giảm."],
     ["Luân chuyển nội bộ","Người Điều động đi/đến: chọn Nơi đến/đi là một đơn vị trong ngành; hệ thống tự thêm người (tên + ngày sinh) sang đơn vị kia và tăng quân số ở đó (dòng “tự động”). Quản lý ở đơn vị nguồn."],
