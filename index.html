@@ -582,24 +582,27 @@ function render(){
 // Nhập file quy hoạch (do phần mềm Rà soát quy hoạch xuất) — mỗi sheet 1 diện/cấp
 function parseQuyHoachFile(wb){
   const na=s=>stripAccent(s).replace(/\s+/g," ").trim();
-  const out=[];
+  const out=[]; const report=[];
+  // gom tên đơn vị (để loại các dòng tiêu đề là tên đơn vị)
+  const unitNames=new Set((STATE&&STATE.units?STATE.units.map(u=>na(u.name)):[]));
   wb.SheetNames.forEach(sheet=>{
-    const ws=wb.Sheets[sheet]; if(!ws||!ws["!ref"])return;
+    const ws=wb.Sheets[sheet];
+    if(!ws||!ws["!ref"]){report.push({sheet,n:0,note:"trống"});return;}
     const rg=XLSX.utils.decode_range(ws["!ref"]);
-    let hdr=-1;
-    for(let r=rg.s.r;r<=Math.min(rg.s.r+9,rg.e.r)&&hdr<0;r++)
-      for(let c=rg.s.c;c<=rg.e.c;c++){const v=na(cellVal(ws,r,c));if(v==="ho va ten"||v==="ho ten"){hdr=r;break;}}
-    if(hdr<0)return;
+    // tìm dòng tiêu đề: có ô CHỨA "họ và tên" / "họ tên", quét tới 20 dòng đầu
+    let hdr=-1,cName=-1;
+    for(let r=rg.s.r;r<=Math.min(rg.s.r+20,rg.e.r)&&hdr<0;r++)
+      for(let c=rg.s.c;c<=rg.e.c;c++){const v=na(cellVal(ws,r,c));if(v.includes("ho va ten")||v.includes("ho ten")){hdr=r;cName=c;break;}}
+    if(hdr<0){report.push({sheet,n:0,note:"không thấy cột Họ và tên"});return;}
     const findCol=(...keys)=>{
       for(let c=rg.s.c;c<=rg.e.c;c++)
-        for(let r=hdr;r<=Math.min(hdr+2,rg.e.r);r++){const v=na(cellVal(ws,r,c));if(v&&keys.some(k=>v===k||v.includes(k)))return c;}
+        for(let r=hdr;r<=Math.min(hdr+3,rg.e.r);r++){const v=na(cellVal(ws,r,c));if(v&&keys.some(k=>v.includes(k)))return c;}
       return -1;
     };
-    const cName=findCol("ho va ten","ho ten");
-    const cDob=findCol("ngay sinh");
-    const cUnit=findCol("don vi");
-    const cCur=findCol("chuc vu hien tai");
-    const cPlan=findCol("chuc danh quy hoach","chuc danh de nghi quy hoach","chuc danh");
+    const cDob=findCol("ngay sinh","nam sinh");
+    const cUnit=findCol("don vi","co quan, don vi","co quan");
+    const cCur=findCol("chuc vu hien tai","chuc vu, chuc danh","chuc vu");
+    const cPlan=findCol("chuc danh quy hoach","chuc danh de nghi","quy hoach","chuc danh");
     const sN=na(sheet);
     const dien=/bo sung|(^|[^a-z])bs([^a-z]|$)/.test(sN)?"Bổ sung":(/duy tri|(^|[^a-z])dt([^a-z]|$)/.test(sN)?"Duy trì":(/phe duyet/.test(sN)?"Phê duyệt":""));
     let cd="";
@@ -607,31 +610,45 @@ function parseQuyHoachFile(wb){
     else if(/truong phong/.test(sN))cd="Trưởng phòng";
     else if(/pho vu truong|pvt/.test(sN))cd="Phó Vụ trưởng";
     else if(/vu truong/.test(sN))cd="Vụ trưởng";
+    let cnt=0, lastUnit="";
     for(let r=hdr+1;r<=rg.e.r;r++){
       if(cName<0)break;
       const name=String(cellVal(ws,r,cName)||"").trim();
-      if(!name||/^(stt|tong|ghi chu|don vi)/.test(na(name)))continue;
+      const unitCell=cUnit>=0?String(cellVal(ws,r,cUnit)||"").trim():"";
       let dob="";
       if(cDob>=0){dob=fmtCellDate(ws,r,cDob)||"";if(!dob)dob=fmtCellDate(ws,r,cDob+1)||"";}
+      const validDob=!!parseVNDate(dob);
+      if(!validDob){
+        if(unitCell) lastUnit=unitCell;
+        else if(name && (unitNames.has(na(name)) || /^(vu |ktnn|van phong|thanh tra|cuc |ban |bao )/.test(na(name)))) lastUnit=name;
+        continue;
+      }
+      if(!name)continue;
+      const nn=na(name);
+      if(/^(stt|tt|tong|ghi chu|nam|nu|don vi|ho va ten|ho ten|co quan)/.test(nn))continue;
+      if(unitNames.has(nn))continue;
       const plan=cPlan>=0?String(cellVal(ws,r,cPlan)||"").trim():"";
       out.push({hoTen:name,ngaySinh:dob,
-        donVi: cUnit>=0?String(cellVal(ws,r,cUnit)||"").trim():"",
+        donVi: unitCell||lastUnit,
         chucVuHienTai: cCur>=0?String(cellVal(ws,r,cCur)||"").trim():"",
         chucDanh: plan||cd||"(không rõ)", dien});
+      cnt++;
     }
+    report.push({sheet,n:cnt});
   });
-  return out;
+  return {list:out, report};
 }
 function importQuyHoach(file){
   const rd=new FileReader();
   rd.onload=e=>{
     try{
       const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
-      const list=parseQuyHoachFile(wb);
-      if(!list.length){alert("Không đọc được danh sách quy hoạch trong file (cần có cột Họ và tên, Ngày sinh, Chức danh quy hoạch).");return;}
-      STATE.quyHoach=list;
+      const {list,report}=parseQuyHoachFile(wb);
+      if(!list.length){alert("Không đọc được người nào có ngày sinh hợp lệ trong file. Cần các cột: Họ và tên, Ngày sinh, Chức danh quy hoạch.");return;}
+      STATE.quyHoach=list; STATE.quyHoachReport=report;
       saveAll();render();
-      toast(`Đã nạp ${list.length} lượt quy hoạch từ "${file.name}"`);
+      const doc=report.filter(r=>r.n>0).length, bo=report.filter(r=>r.n===0).length;
+      toast(`Đã nạp ${list.length} người từ ${doc} sheet`+(bo?`, bỏ qua ${bo} sheet`:"")+`.`);
     }catch(err){alert("Lỗi đọc file quy hoạch: "+err.message);console.error(err);}
   };
   rd.readAsArrayBuffer(file);
@@ -678,6 +695,24 @@ function renderQuyHoach(){
 
   const list=STATE.quyHoach||[];
   if(!list.length){ return frag; }
+
+  // Báo cáo đọc từng sheet
+  const rep=STATE.quyHoachReport||[];
+  if(rep.length){
+    const rpp=el("div",{class:"panel"});
+    rpp.appendChild(el("div",{class:"ph"},el("h2",{},"Kết quả đọc file (theo sheet)"),
+      el("span",{class:"sub"},"Kiểm tra xem đã đọc hết các sheet chưa")));
+    const w=el("div",{class:"table-wrap"});const t=el("table",{});
+    const h=el("tr",{});["Sheet","Số người đọc được","Ghi chú"].forEach(c=>h.appendChild(el("th",{},c)));
+    t.appendChild(el("thead",{},h));const b=el("tbody",{});
+    rep.forEach(r=>{const tr=el("tr",{});if(!r.n)tr.style.background="#fff7ed";
+      tr.appendChild(el("td",{},r.sheet));
+      tr.appendChild(numCell(r.n||0));
+      tr.appendChild(el("td",{class:"mini"},r.note||(r.n?"✔ đã đọc":"—")));
+      b.appendChild(tr);});
+    t.appendChild(b);w.appendChild(t);rpp.appendChild(el("div",{class:"pb"},w));
+    frag.appendChild(rpp);
+  }
 
   // Thống kê theo chức danh + diện; và số người khớp với danh sách hiện tại
   const idx=qhIndex();
