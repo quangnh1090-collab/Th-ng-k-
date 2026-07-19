@@ -411,9 +411,12 @@ function parseUnitSheet(name,ws){
 }
 function fmtCellDate(ws,r,c){
   const a=XLSX.utils.encode_cell({r,c});const cell=ws[a];if(!cell)return"";
-  if(cell.t==="n"&&cell.v>20000){ // excel serial date
-    const d=XLSX.SSF?XLSX.SSF.parse_date_code(cell.v):null;
-    if(d)return `${String(d.d).padStart(2,"0")}/${String(d.m).padStart(2,"0")}/${d.y}`;
+  if(cell.t==="d"&&cell.v instanceof Date){const dt=cell.v;return `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()}`;}
+  if(cell.t==="n"&&cell.v>20000&&cell.v<80000){ // excel serial date
+    let d=(XLSX.SSF&&XLSX.SSF.parse_date_code)?XLSX.SSF.parse_date_code(cell.v):null;
+    if(d&&d.y)return `${String(d.d).padStart(2,"0")}/${String(d.m).padStart(2,"0")}/${d.y}`;
+    const dt=new Date(Math.round((cell.v-25569)*86400000)); // dự phòng: epoch Excel 1899-12-30
+    if(!isNaN(dt))return `${String(dt.getUTCDate()).padStart(2,"0")}/${String(dt.getUTCMonth()+1).padStart(2,"0")}/${dt.getUTCFullYear()}`;
   }
   return String(cell.v||"").trim();
 }
@@ -588,6 +591,8 @@ function parseQuyHoachFile(wb){
   wb.SheetNames.forEach(sheet=>{
     const ws=wb.Sheets[sheet];
     if(!ws||!ws["!ref"]){report.push({sheet,n:0,note:"trống"});return;}
+    // Bỏ qua danh sách "Đưa ra" / bị loại — KHÔNG tính vào quy hoạch
+    if(/dua ra|loai khoi|loai ra|khong du dieu kien|dua khoi/.test(na(sheet))){report.push({sheet,n:0,note:"danh sách ĐƯA RA — không tính vào quy hoạch"});return;}
     const rg=XLSX.utils.decode_range(ws["!ref"]);
     // tìm dòng tiêu đề: có ô CHỨA "họ và tên" / "họ tên", quét tới 20 dòng đầu
     let hdr=-1,cName=-1;
@@ -599,7 +604,8 @@ function parseQuyHoachFile(wb){
         for(let r=hdr;r<=Math.min(hdr+3,rg.e.r);r++){const v=na(cellVal(ws,r,c));if(v&&keys.some(k=>v.includes(k)))return c;}
       return -1;
     };
-    const cDob=findCol("ngay sinh","nam sinh");
+    const cDob=findCol("ngay sinh","nam sinh","ngay thang nam sinh");
+    const cGt=findCol("gioi tinh","phai");
     const cUnit=findCol("don vi","co quan, don vi","co quan");
     const cCur=findCol("chuc vu hien tai","chuc vu, chuc danh","chuc vu");
     const cPlan=findCol("chuc danh quy hoach","chuc danh de nghi","quy hoach","chuc danh");
@@ -610,27 +616,37 @@ function parseQuyHoachFile(wb){
     else if(/truong phong/.test(sN))cd="Trưởng phòng";
     else if(/pho vu truong|pvt/.test(sN))cd="Phó Vụ trưởng";
     else if(/vu truong/.test(sN))cd="Vụ trưởng";
+    // quét ngày sinh ở nhiều cột quanh cột "Ngày sinh" (kể cả tách Nam/Nữ)
+    const dobAt=r=>{
+      const cols=[]; if(cDob>=0){for(let dc=cDob;dc<=cDob+3;dc++)cols.push(dc); cols.push(cDob-1);}
+      for(const dc of cols){ if(dc<rg.s.c)continue; const v=fmtCellDate(ws,r,dc); if(v&&parseVNDate(v))return v; }
+      // không thấy: quét toàn hàng tìm 1 ô là ngày
+      for(let c=rg.s.c;c<=rg.e.c;c++){ const v=fmtCellDate(ws,r,c); if(v&&/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/.test(v)&&parseVNDate(v))return v; }
+      return "";
+    };
+    const UNIT_RE=/^(vu |ktnn|kiem toan nha nuoc|van phong|thanh tra|cuc |ban |bao |tap chi|hoc vien|truong dao tao|khoi )/;
     let cnt=0, lastUnit="";
     for(let r=hdr+1;r<=rg.e.r;r++){
       if(cName<0)break;
       const name=String(cellVal(ws,r,cName)||"").trim();
       const unitCell=cUnit>=0?String(cellVal(ws,r,cUnit)||"").trim():"";
-      let dob="";
-      if(cDob>=0){dob=fmtCellDate(ws,r,cDob)||"";if(!dob)dob=fmtCellDate(ws,r,cDob+1)||"";}
-      const validDob=!!parseVNDate(dob);
-      if(!validDob){
-        if(unitCell) lastUnit=unitCell;
-        else if(name && (unitNames.has(na(name)) || /^(vu |ktnn|van phong|thanh tra|cuc |ban |bao )/.test(na(name)))) lastUnit=name;
-        continue;
-      }
-      if(!name)continue;
       const nn=na(name);
-      if(/^(stt|tt|tong|ghi chu|nam|nu|don vi|ho va ten|ho ten|co quan)/.test(nn))continue;
-      if(unitNames.has(nn))continue;
+      // dòng nhóm đơn vị / tiêu đề lặp
+      if(!name){ if(unitCell)lastUnit=unitCell; continue; }
+      if(unitNames.has(nn)||UNIT_RE.test(nn)){ lastUnit=name; continue; }
+      if(/^(stt|tt|tong|ghi chu|nam$|nu$|don vi|ho va ten|ho ten|co quan)/.test(nn))continue;
+      const dob=dobAt(r);
+      const cur=cCur>=0?String(cellVal(ws,r,cCur)||"").trim():"";
       const plan=cPlan>=0?String(cellVal(ws,r,cPlan)||"").trim():"";
+      const gt=cGt>=0?String(cellVal(ws,r,cGt)||"").trim():"";
+      // là người nếu tên có >=2 chữ và có ít nhất 1 thông tin (ngày sinh / chức vụ / chức danh / giới tính)
+      const looksName = nn.split(" ").length>=2;
+      const hasInfo = dob||cur||plan||gt;
+      if(!looksName || !hasInfo) continue;
       out.push({hoTen:name,ngaySinh:dob,
         donVi: unitCell||lastUnit,
-        chucVuHienTai: cCur>=0?String(cellVal(ws,r,cCur)||"").trim():"",
+        gioiTinh: gt,
+        chucVuHienTai: cur,
         chucDanh: plan||cd||"(không rõ)", dien});
       cnt++;
     }
