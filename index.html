@@ -229,6 +229,7 @@ async function kvDel(k){const d=await db();return new Promise((res,rej)=>{const 
 /* ===================== State ===================== */
 let STATE=null;            // {fileName,importedAt,trackingMonth,reminderDays,units:[...]}
 let ORIGINAL_BUF=null;     // ArrayBuffer template gốc để xuất
+let QH_IDX=null;           // chỉ mục quy hoạch (theo tên + ngày sinh)
 let HISTORY=[];            // [{month,label,savedAt,snapshot}]
 let RETIRE_MAP={};         // {"ten|ngaysinh": "yyyy-mm-dd"} - giữ qua lần import lại
 let ACTIVE_TAB="dashboard";
@@ -561,6 +562,7 @@ function hoSoTable(title,items,kind,doneLabel){
 function render(){
   applyRetirements();
   rebuildTransfers();
+  QH_IDX = STATE ? qhIndex() : null;
   renderTabs();
   const v=$("#view"); v.innerHTML="";
   $("#monthStatus").textContent = STATE? ("Tháng theo dõi: "+monthLabel(STATE.trackingMonth)) : "";
@@ -635,27 +637,23 @@ function importQuyHoach(file){
   rd.readAsArrayBuffer(file);
 }
 function qhIndex(){
-  const byFull={}, byYear={};
+  const byFull={};
   (STATE.quyHoach||[]).forEach(e=>{
     const nm=stripAccent(e.hoTen); const d=parseVNDate(e.ngaySinh);
-    if(d){
-      const kf=nm+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
-      (byFull[kf]=byFull[kf]||[]).push(e);
-      const ky=nm+"|"+d.getFullYear();
-      (byYear[ky]=byYear[ky]||[]).push(e);
-    }
+    if(!d)return;                        // bắt buộc có ngày sinh hợp lệ
+    const kf=nm+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
+    (byFull[kf]=byFull[kf]||[]).push(e);
   });
-  return {byFull,byYear};
+  return {byFull};
+}
+function qhKey(person){
+  const d=parseVNDate(person.ngaySinh); if(!d)return null;
+  return stripAccent(person.hoTen)+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
 }
 function qhFor(person,idx){
   if(!idx)return [];
-  const nm=stripAccent(person.hoTen); const d=parseVNDate(person.ngaySinh);
-  if(!d)return [];
-  const kf=nm+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
-  if(idx.byFull[kf])return idx.byFull[kf];
-  const ky=nm+"|"+d.getFullYear();
-  if(idx.byYear[ky])return idx.byYear[ky];
-  return [];
+  const k=qhKey(person); if(!k)return [];
+  return idx.byFull[k]||[];             // chỉ khớp khi TÊN + NGÀY SINH đầy đủ trùng nhau
 }
 function qhLabel(list){
   // gộp thành chuỗi "Trưởng phòng (Duy trì); Phó Vụ trưởng (Bổ sung)"
@@ -707,7 +705,7 @@ function renderQuyHoach(){
   const tb=el("tbody",{});
   // tập tên+ns hiện có để đánh dấu
   const curKeys=new Set();
-  people.forEach(r=>{const d=parseVNDate(r.p.ngaySinh);if(d)curKeys.add(stripAccent(r.p.hoTen)+"|"+d.getFullYear());});
+  people.forEach(r=>{const k=qhKey(r.p);if(k)curKeys.add(k);});
   const sorted=list.slice().sort((a,b)=>{
     const o={"Vụ trưởng":0,"Phó Vụ trưởng":1,"Trưởng phòng":2,"Phó Trưởng phòng":3};
     const d=(o[a.chucDanh]??9)-(o[b.chucDanh]??9); if(d)return d;
@@ -715,7 +713,7 @@ function renderQuyHoach(){
   });
   sorted.forEach((e,i)=>{
     const d=parseVNDate(e.ngaySinh);
-    const has = d && curKeys.has(stripAccent(e.hoTen)+"|"+d.getFullYear());
+    const has = d && curKeys.has(stripAccent(e.hoTen)+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear());
     const tr=el("tr",{});
     tr.appendChild(el("td",{class:"num"},String(i+1)));
     tr.appendChild(el("td",{},el("strong",{},e.hoTen)));
@@ -1130,7 +1128,7 @@ function personTable(u,which){
   const wrap=el("div",{class:"table-wrap"});
   const tbl=el("table",{});
   const cols=isCC
-    ? ["STT","Họ và tên","Ngày sinh","Giới tính","Chức vụ","Tăng / Giảm","Lý do biến động","Nơi đến / nơi đi","Ngày nghỉ hưu","Ghi chú","Thao tác"]
+    ? ["STT","Họ và tên","Ngày sinh","Giới tính","Chức vụ","Quy hoạch chức danh","Tăng / Giảm","Lý do biến động","Nơi đến / nơi đi","Ngày nghỉ hưu","Ghi chú","Thao tác"]
     : ["STT","Họ và tên","Ngày sinh","Giới tính","Chức vụ / Công việc","Tăng / Giảm","Lý do biến động","Ghi chú","Thao tác"];
   const thead=el("tr",{});cols.forEach(c=>thead.appendChild(el("th",{},c)));
   tbl.appendChild(el("thead",{},thead));
@@ -1142,6 +1140,7 @@ function personTable(u,which){
 }
 function personRow(u,which,person,i){
   const isCC=which==="cc";
+  const qhCell=p=>{const q=qhFor(p,QH_IDX);return el("td",{class:"mini"}, q.length?el("span",{class:"pill",style:"background:#e7f0fb;color:#0b5cad;white-space:normal"},qhLabel(q)):"—");};
   const tr=el("tr",{});
   tr.appendChild(el("td",{class:"num"},String(i+1)));
   if(isCC && person._mirror){
@@ -1150,6 +1149,7 @@ function personRow(u,which,person,i){
     tr.appendChild(el("td",{},person.ngaySinh||""));
     tr.appendChild(el("td",{},person.gioiTinh||""));
     tr.appendChild(el("td",{},person.chucVu||""));
+    tr.appendChild(qhCell(person));
     tr.appendChild(el("td",{},person.tangGiam==="Tăng"?el("span",{class:"pill tang"},"Tăng"):el("span",{class:"pill giam"},"Giảm")));
     tr.appendChild(el("td",{},person.lyDo||""));
     tr.appendChild(el("td",{class:"mini"},"⟵ liên kết"));
@@ -1159,9 +1159,10 @@ function personRow(u,which,person,i){
     return tr;
   }
   tr.appendChild(td(textIn(person,"hoTen","name",()=>{rebuildTransfers();renderTabs();})));
-  tr.appendChild(td(textIn(person,"ngaySinh",null,()=>{rebuildTransfers();})));
+  tr.appendChild(td(textIn(person,"ngaySinh",null,()=>{render();})));
   tr.appendChild(td(selIn(person,"gioiTinh",["","Nam","Nữ"],false,()=>{rebuildTransfers();})));
   tr.appendChild(td(isCC?selIn(person,"chucVu",CHUCVU_OPTS,true,()=>{rebuildTransfers();render();}):textIn(person,"congViec")));
+  if(isCC) tr.appendChild(qhCell(person));
   tr.appendChild(td(selIn(person,"tangGiam",["","Tăng","Giảm"],false,()=>render())));
   tr.appendChild(td(selIn(person,"lyDo",ALL_REASONS,false,()=>{
     if(REASONS_UP.includes(person.lyDo))person.tangGiam="Tăng";
