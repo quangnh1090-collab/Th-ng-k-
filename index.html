@@ -309,8 +309,14 @@ async function importFile(file){
   });
   if(!units.length){ alert("Không tìm thấy sheet đơn vị hợp lệ trong file."); return; }
 
+  // giữ lại dữ liệu tích lũy khi nạp lại file gốc mới
+  const keepQH   = (STATE&&STATE.quyHoach)   ? STATE.quyHoach   : [];
+  const keepRet  = (STATE&&STATE.retired)    ? STATE.retired    : [];
+  const keepLeft = (STATE&&STATE.leftArchive)? STATE.leftArchive: [];
+
   STATE={ fileName:file.name, importedAt:Date.now(), trackingMonth:todayMonth(), reminderDays:60, units, v:2,
-          ccReserve:bases.ccReserve||0, vcReserve:bases.vcReserve||0 };
+          ccReserve:bases.ccReserve||0, vcReserve:bases.vcReserve||0,
+          quyHoach:keepQH, retired:keepRet, leftArchive:keepLeft };
   STATE._group=groupUnitNames();
   ORIGINAL_BUF=buf.slice(0);
   try{ await kvSet("originalBuf",ORIGINAL_BUF); }catch(_){}
@@ -562,6 +568,7 @@ function render(){
   if(ACTIVE_TAB==="dashboard") v.appendChild(renderDashboard());
   else if(ACTIVE_TAB==="units") v.appendChild(renderUnits());
   else if(ACTIVE_TAB==="search") v.appendChild(renderSearch());
+  else if(ACTIVE_TAB==="quyhoach") v.appendChild(renderQuyHoach());
   else if(ACTIVE_TAB==="retire") v.appendChild(renderRetire());
   else if(ACTIVE_TAB==="hoso") v.appendChild(renderHoSo());
   else if(ACTIVE_TAB==="history") v.appendChild(renderHistory());
@@ -569,6 +576,163 @@ function render(){
   else if(ACTIVE_TAB==="help") v.appendChild(renderHelp());
 }
 /* ===================== Tra cứu người & Thống kê đã nghỉ hưu ===================== */
+/* ===================== QUY HOẠCH ===================== */
+// Nhập file quy hoạch (do phần mềm Rà soát quy hoạch xuất) — mỗi sheet 1 diện/cấp
+function parseQuyHoachFile(wb){
+  const na=s=>stripAccent(s).replace(/\s+/g," ").trim();
+  const out=[];
+  wb.SheetNames.forEach(sheet=>{
+    const ws=wb.Sheets[sheet]; if(!ws||!ws["!ref"])return;
+    const rg=XLSX.utils.decode_range(ws["!ref"]);
+    let hdr=-1;
+    for(let r=rg.s.r;r<=Math.min(rg.s.r+9,rg.e.r)&&hdr<0;r++)
+      for(let c=rg.s.c;c<=rg.e.c;c++){const v=na(cellVal(ws,r,c));if(v==="ho va ten"||v==="ho ten"){hdr=r;break;}}
+    if(hdr<0)return;
+    const findCol=(...keys)=>{
+      for(let c=rg.s.c;c<=rg.e.c;c++)
+        for(let r=hdr;r<=Math.min(hdr+2,rg.e.r);r++){const v=na(cellVal(ws,r,c));if(v&&keys.some(k=>v===k||v.includes(k)))return c;}
+      return -1;
+    };
+    const cName=findCol("ho va ten","ho ten");
+    const cDob=findCol("ngay sinh");
+    const cUnit=findCol("don vi");
+    const cCur=findCol("chuc vu hien tai");
+    const cPlan=findCol("chuc danh quy hoach","chuc danh de nghi quy hoach","chuc danh");
+    const sN=na(sheet);
+    const dien=/bo sung|(^|[^a-z])bs([^a-z]|$)/.test(sN)?"Bổ sung":(/duy tri|(^|[^a-z])dt([^a-z]|$)/.test(sN)?"Duy trì":(/phe duyet/.test(sN)?"Phê duyệt":""));
+    let cd="";
+    if(/pho truong phong|ptp/.test(sN))cd="Phó Trưởng phòng";
+    else if(/truong phong/.test(sN))cd="Trưởng phòng";
+    else if(/pho vu truong|pvt/.test(sN))cd="Phó Vụ trưởng";
+    else if(/vu truong/.test(sN))cd="Vụ trưởng";
+    for(let r=hdr+1;r<=rg.e.r;r++){
+      if(cName<0)break;
+      const name=String(cellVal(ws,r,cName)||"").trim();
+      if(!name||/^(stt|tong|ghi chu|don vi)/.test(na(name)))continue;
+      let dob="";
+      if(cDob>=0){dob=fmtCellDate(ws,r,cDob)||"";if(!dob)dob=fmtCellDate(ws,r,cDob+1)||"";}
+      const plan=cPlan>=0?String(cellVal(ws,r,cPlan)||"").trim():"";
+      out.push({hoTen:name,ngaySinh:dob,
+        donVi: cUnit>=0?String(cellVal(ws,r,cUnit)||"").trim():"",
+        chucVuHienTai: cCur>=0?String(cellVal(ws,r,cCur)||"").trim():"",
+        chucDanh: plan||cd||"(không rõ)", dien});
+    }
+  });
+  return out;
+}
+function importQuyHoach(file){
+  const rd=new FileReader();
+  rd.onload=e=>{
+    try{
+      const wb=XLSX.read(new Uint8Array(e.target.result),{type:"array"});
+      const list=parseQuyHoachFile(wb);
+      if(!list.length){alert("Không đọc được danh sách quy hoạch trong file (cần có cột Họ và tên, Ngày sinh, Chức danh quy hoạch).");return;}
+      STATE.quyHoach=list;
+      saveAll();render();
+      toast(`Đã nạp ${list.length} lượt quy hoạch từ "${file.name}"`);
+    }catch(err){alert("Lỗi đọc file quy hoạch: "+err.message);console.error(err);}
+  };
+  rd.readAsArrayBuffer(file);
+}
+function qhIndex(){
+  const byFull={}, byYear={};
+  (STATE.quyHoach||[]).forEach(e=>{
+    const nm=stripAccent(e.hoTen); const d=parseVNDate(e.ngaySinh);
+    if(d){
+      const kf=nm+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
+      (byFull[kf]=byFull[kf]||[]).push(e);
+      const ky=nm+"|"+d.getFullYear();
+      (byYear[ky]=byYear[ky]||[]).push(e);
+    }
+  });
+  return {byFull,byYear};
+}
+function qhFor(person,idx){
+  if(!idx)return [];
+  const nm=stripAccent(person.hoTen); const d=parseVNDate(person.ngaySinh);
+  if(!d)return [];
+  const kf=nm+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
+  if(idx.byFull[kf])return idx.byFull[kf];
+  const ky=nm+"|"+d.getFullYear();
+  if(idx.byYear[ky])return idx.byYear[ky];
+  return [];
+}
+function qhLabel(list){
+  // gộp thành chuỗi "Trưởng phòng (Duy trì); Phó Vụ trưởng (Bổ sung)"
+  const seen=new Set(), parts=[];
+  list.forEach(e=>{const t=e.chucDanh+(e.dien?(" ("+e.dien+")"):"");if(!seen.has(t)){seen.add(t);parts.push(t);}});
+  return parts.join("; ");
+}
+function renderQuyHoach(){
+  const frag=el("div",{});
+  const p=el("div",{class:"panel"});
+  p.appendChild(el("div",{class:"ph"},el("h2",{},"Quy hoạch chức danh"),
+    el("span",{class:"sub"},"Nạp file quy hoạch (từ phần mềm Rà soát quy hoạch) — ghép theo Họ tên + Ngày sinh")));
+  const pb=el("div",{class:"pb"});
+  pb.appendChild(el("div",{class:"alert info"},"File quy hoạch cần có các cột: Họ và tên, Ngày sinh, Chức danh quy hoạch (và Đơn vị nếu có). Mỗi sheet ứng với một diện/cấp (Bổ sung/Duy trì · Trưởng phòng/Phó TP/Vụ trưởng/Phó VT) — hệ thống tự nhận theo tên sheet."));
+  const fi=el("input",{type:"file",id:"qhInput",accept:".xlsx,.xls",style:"display:none"});
+  fi.addEventListener("change",ev=>{const f=ev.target.files[0];if(f)importQuyHoach(f);ev.target.value="";});
+  pb.appendChild(fi);
+  pb.appendChild(el("div",{class:"row"},
+    el("button",{class:"btn primary",onclick:()=>$("#qhInput").click()}, (STATE.quyHoach&&STATE.quyHoach.length)?"⬆ Nạp lại file quy hoạch":"⬆ Nạp file quy hoạch"),
+    (STATE.quyHoach&&STATE.quyHoach.length)?el("button",{class:"btn ghost",onclick:()=>{if(confirm("Xóa dữ liệu quy hoạch đã nạp?")){STATE.quyHoach=[];saveAll();render();}}},"Xóa dữ liệu quy hoạch"):null));
+  p.appendChild(pb);frag.appendChild(p);
+
+  const list=STATE.quyHoach||[];
+  if(!list.length){ return frag; }
+
+  // Thống kê theo chức danh + diện; và số người khớp với danh sách hiện tại
+  const idx=qhIndex();
+  const people=allPeople();
+  const matchedSet=new Set();
+  people.forEach(r=>{ if(qhFor(r.p,idx).length) matchedSet.add(r); });
+  const byCd={};
+  list.forEach(e=>{const k=e.chucDanh||"(không rõ)";byCd[k]=(byCd[k]||0)+1;});
+
+  const sp=el("div",{class:"panel"});
+  sp.appendChild(el("div",{class:"ph"},el("h2",{},"Tổng quan quy hoạch")));
+  const cards=[card("Tổng lượt quy hoạch",String(list.length),"accent")];
+  ["Vụ trưởng","Phó Vụ trưởng","Trưởng phòng","Phó Trưởng phòng"].forEach(cd=>{if(byCd[cd])cards.push(card(cd,String(byCd[cd])));});
+  cards.push(card("Khớp cán bộ hiện có",String(matchedSet.size)));
+  sp.appendChild(el("div",{class:"pb"},el("div",{class:"kpi"},...cards)));
+  frag.appendChild(sp);
+
+  // Bảng chi tiết quy hoạch
+  const tp=el("div",{class:"panel"});
+  tp.appendChild(el("div",{class:"ph"},el("h2",{},"Danh sách quy hoạch"),
+    el("span",{class:"sub"},"“Có trong DS hiện tại” = tìm thấy người trùng tên + ngày sinh ở dữ liệu đang quản lý")));
+  const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
+  const th=el("tr",{});["STT","Họ và tên","Ngày sinh","Đơn vị","Chức vụ hiện tại","Chức danh quy hoạch","Diện","Có trong DS hiện tại"].forEach(c=>th.appendChild(el("th",{},c)));
+  tbl.appendChild(el("thead",{},th));
+  const tb=el("tbody",{});
+  // tập tên+ns hiện có để đánh dấu
+  const curKeys=new Set();
+  people.forEach(r=>{const d=parseVNDate(r.p.ngaySinh);if(d)curKeys.add(stripAccent(r.p.hoTen)+"|"+d.getFullYear());});
+  const sorted=list.slice().sort((a,b)=>{
+    const o={"Vụ trưởng":0,"Phó Vụ trưởng":1,"Trưởng phòng":2,"Phó Trưởng phòng":3};
+    const d=(o[a.chucDanh]??9)-(o[b.chucDanh]??9); if(d)return d;
+    return String(a.donVi).localeCompare(String(b.donVi),"vi");
+  });
+  sorted.forEach((e,i)=>{
+    const d=parseVNDate(e.ngaySinh);
+    const has = d && curKeys.has(stripAccent(e.hoTen)+"|"+d.getFullYear());
+    const tr=el("tr",{});
+    tr.appendChild(el("td",{class:"num"},String(i+1)));
+    tr.appendChild(el("td",{},el("strong",{},e.hoTen)));
+    tr.appendChild(el("td",{},e.ngaySinh||""));
+    tr.appendChild(el("td",{},e.donVi||""));
+    tr.appendChild(el("td",{},e.chucVuHienTai||""));
+    tr.appendChild(el("td",{},el("span",{class:"pill tang"},e.chucDanh)));
+    tr.appendChild(el("td",{},e.dien||""));
+    tr.appendChild(el("td",{class:"mini"},has?"✔ Có":"—"));
+    tb.appendChild(tr);
+  });
+  tbl.appendChild(tb);wrap.appendChild(tbl);
+  tp.appendChild(el("div",{class:"pb"},wrap));
+  frag.appendChild(tp);
+  return frag;
+}
+
 function stripAccent(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").toLowerCase().trim();}
 // Tất cả người đang làm việc (bỏ dòng tự động)
 function allPeople(){
@@ -642,9 +806,10 @@ function renderSearch(){
     resultBox.appendChild(el("div",{class:"mini",style:"margin-bottom:6px"},"Tìm thấy "+rows.length+" người đang làm việc"+(ret.length?" và "+ret.length+" người đã nghỉ hưu":"")));
     if(rows.length){
       const wrap=el("div",{class:"table-wrap"});const tbl=el("table",{});
-      const th=el("tr",{});["STT","Họ và tên","Ngày sinh","Giới tính","Đơn vị","Chức vụ","Diện nhân sự","Biến động trong tháng"].forEach(c=>th.appendChild(el("th",{},c)));
+      const th=el("tr",{});["STT","Họ và tên","Ngày sinh","Giới tính","Đơn vị","Chức vụ","Quy hoạch chức danh","Diện nhân sự","Biến động trong tháng"].forEach(c=>th.appendChild(el("th",{},c)));
       tbl.appendChild(el("thead",{},th));
       const tb=el("tbody",{});
+      const _qi=qhIndex();
       rows.forEach((r,i)=>{
         const tr=el("tr",{});
         tr.appendChild(el("td",{class:"num"},String(i+1)));
@@ -653,6 +818,8 @@ function renderSearch(){
         tr.appendChild(el("td",{},r.p.gioiTinh||""));
         tr.appendChild(el("td",{},el("a",{href:"#",onclick:e=>{e.preventDefault();ACTIVE_UNIT=STATE.units.findIndex(u=>u.name===r.unit);ACTIVE_TAB="units";render();}},r.unit)));
         tr.appendChild(el("td",{},r.p.chucVu||r.p.congViec||""));
+        const qh=qhFor(r.p,_qi);
+        tr.appendChild(el("td",{class:"mini"}, qh.length?el("span",{class:"pill",style:"background:#e7f0fb;color:#0b5cad"},qhLabel(qh)):"—"));
         tr.appendChild(el("td",{class:"mini"},r.kind));
         const bd=el("td",{});
         if(r.p.tangGiam==="Tăng")bd.appendChild(el("span",{class:"pill tang"},"Tăng"));
@@ -750,6 +917,7 @@ function renderTabs(){
     ["dashboard","Tổng hợp"],
     ["units","Đơn vị"],
     ["search","Tra cứu"],
+    ["quyhoach","Quy hoạch",(STATE.quyHoach&&STATE.quyHoach.length)||null,"gray"],
     ["retire","Nhắc hưu trí",due],
     ["hoso","Hồ sơ",hoso||null,"red"],
     ["history","Lịch sử tháng",HISTORY.length||null,"gray"],
@@ -1410,6 +1578,7 @@ function renderHelp(){
     ["Chốt tháng","Tab Lịch sử → “Chốt tháng”: lưu lại tháng cũ (để xuất lại), xóa người đã Giảm, lấy số còn lại làm đầu kỳ tháng mới. Có nút Hoàn tác."],
     ["Xuất Excel","Tab Xuất Excel: xuất tháng hiện tại hoặc bất kỳ tháng đã chốt. File giữ nguyên công thức tổng hợp + định dạng của file gốc."],
     ["Lưu trữ trên máy","Dữ liệu tự lưu trên MÁY NÀY khi bạn chỉnh sửa (đóng/mở lại vẫn còn). Để mang sang USB hoặc máy khác/khi máy hỏng: tab Xuất Excel → “Tạo bản sao lưu” (file .ktnnbak), rồi ở máy kia bấm “Phục hồi từ bản sao lưu”. Nút “Nhập file khác” ở góc trên để xóa và làm lại từ đầu."],
+    ["Quy hoạch","Tab “Quy hoạch”: nạp file quy hoạch (do phần mềm Rà soát quy hoạch xuất). Hệ thống đọc các cột Họ và tên, Ngày sinh, Chức danh quy hoạch, Đơn vị; tự nhận diện (Bổ sung/Duy trì) và cấp (Trưởng phòng/Phó TP/Vụ trưởng/Phó VT) theo tên sheet, rồi GHÉP với cán bộ hiện có theo tên + ngày sinh. Xem tổng quan theo chức danh và danh sách chi tiết; cột “Quy hoạch chức danh” cũng hiện luôn trong tab Tra cứu. Dữ liệu quy hoạch được giữ lại khi nạp lại file gốc."],
     ["Tra cứu & Nghỉ hưu","Tab “Tra cứu”: gõ tên (không cần dấu) để tìm nhanh ngày sinh, đơn vị, chức vụ; bấm tên đơn vị để nhảy tới danh sách đó. Cùng tab có bảng “Thống kê người đã nghỉ hưu” (tổng số, theo năm, theo giới) và nút tải danh sách ra CSV. Người nghỉ hưu được LƯU LẠI khi bấm Chốt tháng, nên không mất sau khi xóa khỏi danh sách."],
     ["Sắp xếp chức vụ","Danh sách tự sắp theo: Vụ trưởng (gồm Kiểm toán trưởng, Chánh Văn phòng, Chánh Thanh tra, Quyền Vụ trưởng) → Phó Vụ trưởng (gồm Phó Kiểm toán trưởng, Phó Chánh Thanh tra…) → Trưởng phòng → Phó Trưởng phòng → Kiểm toán viên → Chuyên viên. Thêm/đổi chức vụ là tự xếp lại."],
     ["Lý do tự gán Tăng/Giảm","Chọn Tiếp nhận/Tuyển dụng, Điều động đến, Tăng khác → tự thành Tăng. Chọn Chuyển công tác, Điều động đi, Hưu trí, Nghỉ việc, Giảm khác → tự thành Giảm."],
