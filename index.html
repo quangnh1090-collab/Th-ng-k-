@@ -624,25 +624,30 @@ function parseQuyHoachFile(wb){
       for(let c=rg.s.c;c<=rg.e.c;c++){ const v=fmtCellDate(ws,r,c); if(v&&/^\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}$/.test(v)&&parseVNDate(v))return v; }
       return "";
     };
-    const UNIT_RE=/^(vu |ktnn|kiem toan nha nuoc|van phong|thanh tra|cuc |ban |bao |tap chi|hoc vien|truong dao tao|khoi )/;
+    // đảm bảo cột đơn vị KHÔNG trùng cột tên/khác
+    const cUnitOK = (cUnit>=0 && cUnit!==cName && cUnit!==cDob && cUnit!==cCur && cUnit!==cPlan && cUnit!==cGt) ? cUnit : -1;
     let cnt=0, lastUnit="";
     for(let r=hdr+1;r<=rg.e.r;r++){
       if(cName<0)break;
       const name=String(cellVal(ws,r,cName)||"").trim();
-      const unitCell=cUnit>=0?String(cellVal(ws,r,cUnit)||"").trim():"";
+      const unitCell=cUnitOK>=0?String(cellVal(ws,r,cUnitOK)||"").trim():"";
       const nn=na(name);
-      // dòng nhóm đơn vị / tiêu đề lặp
-      if(!name){ if(unitCell)lastUnit=unitCell; continue; }
-      if(unitNames.has(nn)||UNIT_RE.test(nn)){ lastUnit=name; continue; }
-      if(/^(stt|tt|tong|ghi chu|nam$|nu$|don vi|ho va ten|ho ten|co quan)/.test(nn))continue;
       const dob=dobAt(r);
       const cur=cCur>=0?String(cellVal(ws,r,cCur)||"").trim():"";
       const plan=cPlan>=0?String(cellVal(ws,r,cPlan)||"").trim():"";
       const gt=cGt>=0?String(cellVal(ws,r,cGt)||"").trim():"";
-      // là người nếu tên có >=2 chữ và có ít nhất 1 thông tin (ngày sinh / chức vụ / chức danh / giới tính)
-      const looksName = nn.split(" ").length>=2;
-      const hasInfo = dob||cur||plan||gt;
-      if(!looksName || !hasInfo) continue;
+      const hasInfo = !!(dob||cur||plan||gt);
+      // Dòng KHÔNG có thông tin người nào = dòng nhóm/đơn vị/tiêu đề -> lấy tên đơn vị rồi bỏ qua
+      if(!hasInfo){
+        if(unitCell) lastUnit=unitCell;
+        else if(name && !/^(stt|tt|tong|ghi chu|nam|nu|don vi|ho va ten|ho ten|co quan|gioi tinh)/.test(nn)) lastUnit=name;
+        continue;
+      }
+      // Có thông tin người: kiểm tra tên hợp lệ
+      if(!name)continue;
+      if(/^(stt|tt|tong|ghi chu|nam$|nu$|don vi|ho va ten|ho ten|co quan)/.test(nn))continue;
+      if(unitNames.has(nn))continue;
+      if(nn.split(" ").length<2)continue;                 // tên người có >=2 chữ
       out.push({hoTen:name,ngaySinh:dob,
         donVi: unitCell||lastUnit,
         gioiTinh: gt,
@@ -779,7 +784,51 @@ function renderQuyHoach(){
   tbl.appendChild(tb);wrap.appendChild(tbl);
   tp.appendChild(el("div",{class:"pb"},wrap));
   frag.appendChild(tp);
+
+  // Người trong quy hoạch CHƯA khớp với danh sách cán bộ hiện tại (để kiểm tra)
+  const unmatched=[];
+  list.forEach(e=>{
+    const d=parseVNDate(e.ngaySinh);
+    if(!d){ unmatched.push({e,why:"Thiếu/sai ngày sinh"}); return; }
+    const k=stripAccent(e.hoTen)+"|"+d.getDate()+"-"+(d.getMonth()+1)+"-"+d.getFullYear();
+    if(!curKeys.has(k)) unmatched.push({e,why:"Không thấy trong DS hiện tại"});
+  });
+  const up=el("div",{class:"panel"});
+  up.appendChild(el("div",{class:"ph"},el("h2",{},"Chưa khớp danh sách hiện tại ("+unmatched.length+")"),
+    el("span",{class:"sub"},"Người có trong quy hoạch nhưng chưa ghép được với cán bộ đang quản lý — kiểm tra tên/ngày sinh")));
+  const upb=el("div",{class:"pb"});
+  if(!unmatched.length){
+    upb.appendChild(el("div",{class:"alert info"},"Tất cả người trong quy hoạch đều đã khớp với danh sách hiện tại."));
+  }else{
+    upb.appendChild(el("div",{class:"alert",style:"background:#fff7ed;border:1px solid #ffb648;color:#8a4b00"},
+      "Có "+unmatched.length+" người chưa khớp. Thường do lệch tên (viết hoa/dấu, thiếu chữ) hoặc lệch ngày sinh giữa file quy hoạch và dữ liệu đang quản lý."));
+    const w=el("div",{class:"table-wrap"});const t=el("table",{});
+    const h=el("tr",{});["STT","Họ và tên","Ngày sinh","Đơn vị (theo file QH)","Chức danh quy hoạch","Lý do chưa khớp"].forEach(c=>h.appendChild(el("th",{},c)));
+    t.appendChild(el("thead",{},h));const b=el("tbody",{});
+    unmatched.forEach((x,i)=>{const tr=el("tr",{});tr.style.background="#fff7ed";
+      tr.appendChild(el("td",{class:"num"},String(i+1)));
+      tr.appendChild(el("td",{},el("strong",{},x.e.hoTen)));
+      tr.appendChild(el("td",{},x.e.ngaySinh||"(trống)"));
+      tr.appendChild(el("td",{},x.e.donVi||""));
+      tr.appendChild(el("td",{},x.e.chucDanh+(x.e.dien?(" ("+x.e.dien+")"):"")));
+      tr.appendChild(el("td",{class:"mini"},x.why));
+      b.appendChild(tr);});
+    t.appendChild(b);w.appendChild(t);upb.appendChild(w);
+    upb.appendChild(el("div",{class:"row",style:"margin-top:10px"},
+      el("button",{class:"btn",onclick:()=>exportUnmatchedQH(unmatched)},"⬇ Tải danh sách chưa khớp (CSV)")));
+  }
+  up.appendChild(upb);frag.appendChild(up);
   return frag;
+}
+function exportUnmatchedQH(unmatched){
+  const head=["STT","Ho va ten","Ngay sinh","Don vi (file QH)","Chuc danh quy hoach","Ly do chua khop"];
+  const esc=v=>'"'+String(v==null?"":v).replace(/"/g,'""')+'"';
+  const rows=unmatched.map((x,i)=>[i+1,x.e.hoTen,x.e.ngaySinh,x.e.donVi,x.e.chucDanh+(x.e.dien?" ("+x.e.dien+")":""),x.why].map(esc).join(","));
+  const csv="\uFEFF"+head.map(esc).join(",")+"\n"+rows.join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=el("a",{href:URL.createObjectURL(blob),download:"QuyHoach_ChuaKhop.csv"});
+  document.body.appendChild(a);a.click();a.remove();
+  toast("Đã tải danh sách chưa khớp");
 }
 
 function stripAccent(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D").toLowerCase().trim();}
