@@ -1171,26 +1171,113 @@ function editNum(u,field,val){
 }
 
 /* ----- Units (editor) ----- */
+let SHOW_ADD_UNIT=false;
 function renderUnits(){
   const frag=el("div",{});
   // chooser
   const ch=el("div",{class:"panel"});
-  ch.appendChild(el("div",{class:"ph"},el("h2",{},"Chọn đơn vị")));
+  ch.appendChild(el("div",{class:"ph"},el("h2",{},"Chọn đơn vị"),el("span",{class:"spacer"}),
+    el("button",{class:"btn sm primary",onclick:()=>{SHOW_ADD_UNIT=!SHOW_ADD_UNIT;render();}}, SHOW_ADD_UNIT?"Đóng":"+ Thêm đơn vị")));
+  const chb=el("div",{class:"pb"});
+  if(SHOW_ADD_UNIT){
+    const nm=el("input",{class:"cell-input",placeholder:"Tên đơn vị mới",style:"min-width:240px"});
+    const kd=el("select",{class:"cell-input"}); [["CC","Công chức"],["VC","Viên chức"]].forEach(o=>kd.appendChild(el("option",{value:o[0]},o[1])));
+    const be=el("input",{class:"cell-input",type:"number",placeholder:"Biên chế",style:"max-width:90px",value:"0"});
+    const br=el("input",{class:"cell-input",type:"number",placeholder:"Số phòng",style:"max-width:90px",value:"0"});
+    chb.appendChild(el("div",{class:"alert info"},"Thêm một đơn vị mới (trống). Sau đó chọn đơn vị để thêm người, hoặc dùng “Cơ cấu” để chuyển người từ đơn vị khác sang."));
+    chb.appendChild(el("div",{class:"row",style:"gap:8px;flex-wrap:wrap;align-items:center"},
+      el("span",{class:"mini"},"Tên:"),nm,el("span",{class:"mini"},"Loại:"),kd,el("span",{class:"mini"},"Biên chế:"),be,el("span",{class:"mini"},"Số phòng:"),br,
+      el("button",{class:"btn primary sm",onclick:()=>{
+        const name=nm.value.trim(); if(!name){alert("Nhập tên đơn vị.");return;}
+        if(STATE.units.some(x=>stripAccent(x.name)===stripAccent(name))){alert("Đã có đơn vị tên này.");return;}
+        addUnit(name,kd.value,parseInt(be.value||"0",10)||0,parseInt(br.value||"0",10)||0);
+      }},"Tạo đơn vị")));
+  }
   const list=el("div",{class:"unit-list"});
   STATE.units.forEach((u,i)=>{
     const s=unitStats(u);
     list.appendChild(el("button",{class:"unit-btn"+(i===ACTIVE_UNIT?" active":""),onclick:()=>{ACTIVE_UNIT=i;render();}},
       el("div",{class:"n"},u.name,el("span",{class:"tag"+(u.kind==="VC"?" vc":"")},u.kind)),
-      el("div",{class:"m"},`Có mặt: ${s.D} · CC/VC: ${u.cc.length} · HĐ: ${u.hd.length}`)));
+      el("div",{class:"m"},`Có mặt: ${s.D} · CC/VC: ${u.cc.filter(p=>!p._mirror).length} · HĐ: ${u.hd.length}`)));
   });
-  ch.appendChild(el("div",{class:"pb"},list));
+  chb.appendChild(list);
+  ch.appendChild(chb);
   frag.appendChild(ch);
 
   const u=STATE.units[ACTIVE_UNIT];
   if(!u)return frag;
   frag.appendChild(personTable(u,"cc"));
   frag.appendChild(personTable(u,"hd"));
+
+  // Panel Cơ cấu tổ chức cho đơn vị đang chọn
+  const others=STATE.units.filter(x=>x!==u).map(x=>x.name);
+  const cp=el("div",{class:"panel"});
+  cp.appendChild(el("div",{class:"ph"},el("h2",{},"Cơ cấu: "+u.name),
+    el("span",{class:"sub"},"Sắp xếp lại tổ chức — chuyển người, giải thể, đổi tên đơn vị")));
+  const cpb=el("div",{class:"pb"});
+  const nppl=u.cc.filter(p=>!p._mirror).length;
+  // Đổi tên
+  const rn=el("input",{class:"cell-input",value:u.name,style:"min-width:240px"});
+  cpb.appendChild(el("div",{class:"row",style:"gap:8px;align-items:center;margin-bottom:10px"},
+    el("span",{class:"mini"},"Đổi tên:"),rn,
+    el("button",{class:"btn sm",onclick:()=>{const v=rn.value.trim();if(v&&v!==u.name)renameUnit(u,v);}},"Lưu tên")));
+  // Chuyển toàn bộ người sang đơn vị khác (giữ đơn vị này)
+  const dsel=el("select",{class:"cell-input"}); dsel.appendChild(el("option",{value:""},"— chọn đơn vị nhận —")); others.forEach(n=>dsel.appendChild(el("option",{value:n},n)));
+  cpb.appendChild(el("div",{class:"row",style:"gap:8px;align-items:center;margin-bottom:10px"},
+    el("span",{class:"mini"},`Chuyển toàn bộ ${nppl} người sang:`),dsel,
+    el("button",{class:"btn sm",onclick:()=>{if(!dsel.value){alert("Chọn đơn vị nhận.");return;}if(confirm(`Chuyển toàn bộ ${nppl} người sang "${dsel.value}"? Đơn vị này sẽ còn 0 người.`))moveAllPeople(u,dsel.value,false);}},"Chuyển người")));
+  // Giải thể
+  const gsel=el("select",{class:"cell-input"}); gsel.appendChild(el("option",{value:""},"— chuyển người sang (nếu còn) —")); others.forEach(n=>gsel.appendChild(el("option",{value:n},n)));
+  cpb.appendChild(el("div",{class:"row",style:"gap:8px;align-items:center"},
+    el("span",{class:"mini"},"Giải thể đơn vị này:"),gsel,
+    el("button",{class:"btn sm",style:"background:#fde8e8;border-color:#f3b4b4;color:#a12",onclick:()=>{
+      if(nppl>0 && !gsel.value){alert("Đơn vị còn "+nppl+" người — hãy chọn đơn vị nhận trước khi giải thể.");return;}
+      if(confirm(`Giải thể "${u.name}"?`+(nppl>0?` Chuyển ${nppl} người sang "${gsel.value}" rồi xóa đơn vị.`:" Đơn vị trống, sẽ bị xóa.")))dissolveUnit(u,gsel.value);
+    }},"Giải thể")));
+  cp.appendChild(cpb);frag.appendChild(cp);
   return frag;
+}
+function addUnit(name,kind,baseE,baseR){
+  STATE.units.push({name,sheetName:name,kind,cc:[],hd:[],baseC:0,baseE:baseE||0,baseR:baseR||0,baseW:0,baseRow:null,_new:true});
+  STATE._group=groupUnitNames();
+  ACTIVE_UNIT=STATE.units.length-1; SHOW_ADD_UNIT=false;
+  markDirty();render();toast(`Đã thêm đơn vị "${name}"`);
+}
+function renameUnit(u,newName){
+  if(STATE.units.some(x=>x!==u&&stripAccent(x.name)===stripAccent(newName))){alert("Trùng tên đơn vị khác.");return;}
+  // cập nhật liên kết luân chuyển đang trỏ tới tên cũ
+  STATE.units.forEach(x=>x.cc.forEach(p=>{if(p._destUnit===u.name)p._destUnit=newName;}));
+  u.name=newName; u.sheetName=u.sheetName||newName;
+  STATE._group=groupUnitNames();
+  markDirty();render();toast("Đã đổi tên đơn vị");
+}
+function relocatePeople(fromU,people,dest){
+  const moved=people.filter(p=>!p._mirror);
+  moved.forEach(p=>{ delete p._mirror; delete p._destUnit; p.tangGiam=""; p.lyDo=""; });
+  dest.cc=dest.cc.concat(moved);
+  fromU.cc=fromU.cc.filter(p=>!moved.includes(p));
+  const n=moved.length;
+  fromU.baseC=Math.max(0,(fromU.baseC||0)-n);
+  dest.baseC=(dest.baseC||0)+n;
+  sortCC(dest.cc);
+}
+function moveAllPeople(u,destName,silent){
+  const dest=STATE.units.find(x=>x.name===destName); if(!dest)return;
+  const people=u.cc.filter(p=>!p._mirror).slice();
+  const nhd=u.hd.slice();
+  relocatePeople(u,people,dest);
+  dest.hd=dest.hd.concat(nhd); u.hd=[];
+  STATE._group=groupUnitNames();
+  markDirty(); if(!silent)render();
+  if(!silent)toast(`Đã chuyển ${people.length} người sang "${destName}"`);
+}
+function dissolveUnit(u,destName){
+  if(destName){ moveAllPeople(u,destName,true); }
+  const idx=STATE.units.indexOf(u);
+  STATE.units=STATE.units.filter(x=>x!==u);
+  if(ACTIVE_UNIT>=STATE.units.length)ACTIVE_UNIT=Math.max(0,STATE.units.length-1);
+  STATE._group=groupUnitNames();
+  markDirty();render();toast(`Đã giải thể "${u.name}"`+(destName?` (chuyển người sang "${destName}")`:""));
 }
 function isTransferReason(r){ return r==="Điều động đi"||r==="Điều động đến"; }
 function normalizeVNDate(s){
