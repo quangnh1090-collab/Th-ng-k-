@@ -342,7 +342,8 @@ function parseSummaryBases(wb){
     if(/^TỔNG/i.test(nm))continue;            // bỏ dòng tổng
     const C=cellNum(ws,r,2), E=cellNum(ws,r,4), R=cellNum(ws,r,17), W=cellNum(ws,r,22);
     if(/^Dự phòng/i.test(nm)){ if(section==="VC")vcReserve=E||0; else ccReserve=E||0; continue; }
-    if(C==null&&E==null&&R==null)continue;     // bỏ dòng trống
+    const hasSheet = !!(wb.Sheets[nm] || (section==="VC" && wb.Sheets["VC - "+nm]));
+    if(C==null&&E==null&&R==null&&!hasSheet)continue;     // bỏ dòng trống/ghi chú (đơn vị rỗng nhưng có sheet vẫn giữ, đầu kỳ=0)
     const item={name:nm,C:C||0,E:E||0,R:R||0,W:W||0,row:r+1};   // row = số dòng Excel (1-based)
     if(section==="VC")vc.push(item); else cc.push(item);
   }
@@ -480,43 +481,43 @@ function applyRetirements(){
 }
 
 /* ===================== Hồ sơ (nộp về / chuyển đi) ===================== */
+// Nhóm B: Cục CNTT, Trường ĐT&BD NVKT, Báo Kiểm toán, các KTNN khu vực. Nhóm A: còn lại.
+function isGroupB(name){
+  const n=stripAccent(name);
+  return n.includes("cong nghe") || n.includes("nvkt") || n.includes("bao kiem toan") || n.includes("khu vuc");
+}
 function collectHoSo(){
+  // incoming = NHẬN VỀ (điều động B→A) ; outgoing = CHUYỂN ĐI (điều động A→B)
   const incoming=[], outgoing=[];
   if(!STATE)return {incoming,outgoing};
+  const key=p=>stripAccent(p.hoTen)+"|"+String(p.ngaySinh||"").trim();
+  // bản đồ nơi ĐẾN theo tên+ngày sinh (gồm cả dòng tự động _mirror để bắt được cả app trực tiếp lẫn file nạp lại)
+  const denMap={};
+  STATE.units.forEach(u=>u.cc.forEach(p=>{ if(p.lyDo==="Điều động đến") denMap[key(p)]=u.name; }));
+  // neo trên các dòng "Điều động đi" (mỗi lần điều động chỉ có 1 dòng đi ở đơn vị nguồn) -> 1 mục/1 người
   STATE.units.forEach(u=>u.cc.forEach(p=>{
     if(p._mirror)return;
-    const here=inGroup(u.name);
-    const ly=p.lyDo;
-    if(isTransferReason(ly)){
-      if(p._destUnit){
-        // có liên kết nơi đến/đi: xác định chính xác từ/đến
-        const from = ly==="Điều động đi"? u.name : p._destUnit;
-        const to   = ly==="Điều động đi"? p._destUnit : u.name;
-        if(inGroup(to)&&!inGroup(from))
-          incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đến từ ngoài nhóm",done:!!p._hoSoNop,kind:"nop"});
-        else if(inGroup(from)&&!inGroup(to))
-          outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đi ra ngoài nhóm",done:!!p._hoSoChuyen,kind:"chuyen"});
-      }else if(here){
-        // mất liên kết (file nạp lại): nhận diện theo nhóm của chính đơn vị này
-        if(ly==="Điều động đi")
-          outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"(đơn vị khác)",reason:"Điều động đi",done:!!p._hoSoChuyen,kind:"chuyen"});
+    const inA=!isGroupB(u.name);
+    // (1) Điều động đi: phân loại theo A/B
+    if(p.lyDo==="Điều động đi"){
+      const from=u.name;
+      const to=p._destUnit || denMap[key(p)] || null;
+      const fromB=isGroupB(from);
+      const toB = to!=null ? isGroupB(to) : !fromB;
+      if(fromB!==toB){
+        if(!fromB && toB)
+          outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to:to||"(nhóm B)",reason:"Điều động sang CNTT/Trường/Báo/khu vực → chuyển hồ sơ đi",done:!!p._hoSoChuyen,kind:"chuyen"});
         else
-          incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"(đơn vị khác)",to:u.name,reason:"Điều động đến",done:!!p._hoSoNop,kind:"nop"});
+          incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to:to||"(nhóm A)",reason:"Điều động từ CNTT/Trường/Báo/khu vực về → nhận hồ sơ về",done:!!p._hoSoNop,kind:"nop"});
       }
     }
-    // Tiếp nhận / Tuyển dụng vào đơn vị trong nhóm -> THU hồ sơ
-    if(here && ly==="Tiếp nhận / Tuyển dụng" && p.tangGiam!=="Giảm"){
-      if(!incoming.some(it=>it.p===p))
-        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Tiếp nhận / Tuyển dụng vào nhóm",done:!!p._hoSoNop,kind:"nop"});
+    // (2) Tiếp nhận / Tuyển dụng mới vào đơn vị nhóm A -> NHẬN hồ sơ về
+    if(inA && p.lyDo==="Tiếp nhận / Tuyển dụng" && p.tangGiam!=="Giảm"){
+      incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Tiếp nhận / Tuyển dụng mới → nhận hồ sơ về",done:!!p._hoSoNop,kind:"nop"});
     }
-    // Chuyển công tác từ đơn vị trong nhóm -> BÀN GIAO hồ sơ
-    if(here && ly==="Chuyển công tác"){
-      if(!outgoing.some(it=>it.p===p))
-        outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"—",reason:"Chuyển công tác (bàn giao hồ sơ)",done:!!p._hoSoChuyen,kind:"chuyen"});
-    }
-    if(cvNorm(p.chucVu)==="phó kiểm toán trưởng" && p.tangGiam==="Tăng"){
-      if(!incoming.some(it=>it.p===p))
-        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Bổ nhiệm Phó Kiểm toán trưởng",done:!!p._hoSoNop,kind:"nop"});
+    // (3) Chuyển công tác từ đơn vị nhóm A -> CHUYỂN hồ sơ đi
+    if(inA && p.lyDo==="Chuyển công tác"){
+      outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"—",reason:"Chuyển công tác → chuyển hồ sơ đi",done:!!p._hoSoChuyen,kind:"chuyen"});
     }
   }));
   return {incoming,outgoing};
@@ -527,8 +528,8 @@ function renderHoSo(){
   const {incoming,outgoing}=collectHoSo();
   const warn=incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;
   const top=el("div",{class:"panel"});
-  top.appendChild(el("div",{class:"ph"},el("h2",{},"Quản lý hồ sơ điều động / bổ nhiệm"),
-    el("span",{class:"sub"},"Nhóm có hồ sơ: từ Vụ Tổ chức cán bộ đến hết chuyên ngành VII")));
+  top.appendChild(el("div",{class:"ph"},el("h2",{},"Quản lý hồ sơ điều động"),
+    el("span",{class:"sub"},"Chuyển đi: điều động A→B (CNTT/Trường/Báo/khu vực) và chuyển công tác từ nhóm A. Nhận về: điều động B→A và tiếp nhận/tuyển dụng mới vào nhóm A")));
   const msg = warn>0
     ? el("div",{class:"alert",style:"background:#fff4e5;border:1px solid #ffb648;color:#8a4b00"}, "⚠ Còn "+warn+" hồ sơ chưa xử lý (xem danh sách bên dưới).")
     : el("div",{class:"alert info"}, "✔ Tất cả hồ sơ đã được xử lý.");
@@ -1656,24 +1657,68 @@ async function doExport(snap, month){
       const wrf=zip.file("xl/_rels/workbook.xml.rels");
       if(wrf){const wr=await wrf.async("string"); zip.file("xl/_rels/workbook.xml.rels", wr.replace(/<Relationship[^>]*calcChain\.xml[^>]*\/>/g,""));}
     }
-    // Ghi số nền hiện tại của tool (đầu kỳ C / biên chế E / số phòng R) vào bảng tổng hợp 4-2026
+    // ==== Đổi tên & XÓA đơn vị ====
+    const owb = XLSX.read(ORIGINAL_BUF,{type:"array"});
+    const renamed = snap.units.filter(u=>u.sheetName && u.name && u.name!==u.sheetName && nameToPath[u.sheetName]);
+    const curSheets = new Set(snap.units.map(u=>u.sheetName));
+    const deptSheets = Object.keys(nameToPath).filter(n=>!SPECIAL_SHEETS.includes(n));
+    const deleted = deptSheets.filter(n=>!curSheets.has(n));
+    // (1) Xóa dữ liệu người ở các sheet đã xóa (tránh đếm trùng)
+    for(const n of deleted){
+      const path=nameToPath[n]; if(!path||!zip.file(path))continue;
+      const pu=parseUnitSheet(n, owb.Sheets[n]); if(!pu)continue;
+      pu.cc=[]; pu.hd=[];
+      const xml=await zip.file(path).async("string");
+      zip.file(path, patchSheet(xml,pu));
+    }
+    // (2) Đổi tham chiếu công thức tên sheet cũ -> mới ở MỌI sheet
+    if(renamed.length){
+      const seen=new Set();
+      for(const fpath of Object.values(nameToPath)){
+        if(seen.has(fpath)||!zip.file(fpath))continue; seen.add(fpath);
+        let x=await zip.file(fpath).async("string"), changed=false;
+        for(const u of renamed){ const a="'"+xmlEsc(u.sheetName)+"'", b="'"+xmlEsc(u.name)+"'"; if(x.indexOf(a)>=0){x=x.split(a).join(b);changed=true;} }
+        if(changed) zip.file(fpath,x);
+      }
+    }
+    // (3) Bảng tổng hợp: số nền + tên đơn vị (đổi tên) + ẩn tên đơn vị đã xóa
     const sumPath=nameToPath["4-2026"];
     if(sumPath && zip.file(sumPath)){
-      const sx=await zip.file(sumPath).async("string");
-      zip.file(sumPath, patchSummaryBases(sx, snap.units));
+      let sx=await zip.file(sumPath).async("string");
+      sx=patchSummaryBases(sx, snap.units);
+      if(deleted.length){
+        const ob=parseSummaryBases(owb); const rowByName={};
+        ob.cc.forEach(b=>rowByName[b.name]=b.row);
+        ob.vc.forEach(b=>{ rowByName["VC - "+b.name]=b.row; });
+        const delRows=deleted.map(n=>rowByName[n]).filter(Boolean);
+        if(delRows.length) sx=blankSummaryRows(sx, delRows);
+      }
+      zip.file(sumPath, sx);
     }
-    // Buộc Excel tính lại toàn bộ công thức khi mở (để "số có mặt hiện tại" luôn cập nhật)
+    // (4) Workbook: đổi tên tab sheet + ẩn tab sheet đã xóa + buộc tính lại
     const wbpf=zip.file("xl/workbook.xml");
     if(wbpf){
       let wx=await wbpf.async("string");
+      if(renamed.length||deleted.length){
+        wx=wx.replace(/<sheet\b[^>]*?\bname="([^"]*)"[^>]*?\/?>/g, (m,nm)=>{
+          const plain=xmlUnesc(nm);
+          let out=m;
+          const ru=renamed.find(u=>u.sheetName===plain);
+          if(ru) out=out.replace('name="'+nm+'"', 'name="'+xmlEsc(ru.name)+'"');
+          if(deleted.includes(plain) && !/\bstate=/.test(out)) out=out.replace(/(<sheet\b)/,'$1 state="hidden"');
+          return out;
+        });
+      }
       if(/<calcPr\b/.test(wx)){ if(!/fullCalcOnLoad/.test(wx)) wx=wx.replace(/<calcPr\b([^>]*?)\/?>/, m=>m.replace(/\/?>$/,' fullCalcOnLoad="1"/>')); }
       else { wx=wx.replace(/<\/workbook>/,'<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>'); }
       zip.file("xl/workbook.xml", wx);
     }
+    const _n=new Date(), _p=x=>String(x).padStart(2,"0");
+    const _stamp=`${_p(_n.getDate())}-${_p(_n.getMonth()+1)}_${_p(_n.getHours())}h${_p(_n.getMinutes())}`;
     const out=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
     const a=document.createElement("a");
     a.href=URL.createObjectURL(out);
-    a.download=`ThongKe_NhanSu_${month}.xlsx`;
+    a.download=`ThongKe_NhanSu_${month}_(xuat_${_stamp}).xlsx`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1726,6 +1771,7 @@ function patchSummaryBases(xml, units){
   units.forEach(u=>{
     if(!u.baseRow || !rows.has(u.baseRow))return;
     let rs=rows.get(u.baseRow);
+    if(u.sheetName && u.name && u.name!==u.sheetName) rs=setCellInRow(rs,"B",u.baseRow,u.name);
     rs=setNumCell(rs,"C",u.baseRow,u.baseC);
     if(u.baseE>0) rs=setNumCell(rs,"E",u.baseRow,u.baseE);
     if(u.baseR>0) rs=setNumCell(rs,"R",u.baseRow,u.baseR);
@@ -1735,6 +1781,21 @@ function patchSummaryBases(xml, units){
   const allN=[...rows.keys()].sort((a,b)=>a-b);
   const newBody=allN.map(n=>rows.get(n)).join("");
   return xml.slice(0,sdm.index)+sdm[1]+newBody+sdm[3]+xml.slice(sdm.index+sdm[0].length);
+}
+function blankSummaryRows(xml, rowNums){
+  const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/); if(!sdm)return xml;
+  const rows=new Map(); const rowRe=/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g; let mm;
+  while((mm=rowRe.exec(sdm[2]))) rows.set(+mm[1],mm[0]);
+  rowNums.forEach(n=>{
+    if(!rows.has(n))return;
+    let rs=rows.get(n);
+    rs=setCellInRow(rs,"B",n,"");                 // ẩn tên đơn vị
+    ["C","E","R","W"].forEach(c=>{ rs=setNumCell(rs,c,n,""); });   // xóa số nền
+    rs=rs.replace(/^(<row\b[^>]*?)(\s*\/?>)/, (m,p1,p2)=> /\bhidden=/.test(p1)? m : p1+' hidden="1"'+p2);  // ẩn hẳn dòng
+    rows.set(n,rs);
+  });
+  const allN=[...rows.keys()].sort((a,b)=>a-b);
+  return xml.slice(0,sdm.index)+sdm[1]+allN.map(n=>rows.get(n)).join("")+sdm[3]+xml.slice(sdm.index+sdm[0].length);
 }
 function patchSheet(xml,u){
   const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/);
