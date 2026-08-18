@@ -486,21 +486,31 @@ function collectHoSo(){
   STATE.units.forEach(u=>u.cc.forEach(p=>{
     if(p._mirror)return;
     const here=inGroup(u.name);
-    if(isTransferReason(p.lyDo)&&p._destUnit){
-      const from = p.lyDo==="Điều động đi"? u.name : p._destUnit;
-      const to   = p.lyDo==="Điều động đi"? p._destUnit : u.name;
-      if(inGroup(to)&&!inGroup(from))
-        incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đến từ ngoài nhóm",done:!!p._hoSoNop,kind:"nop"});
-      else if(inGroup(from)&&!inGroup(to))
-        outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đi ra ngoài nhóm",done:!!p._hoSoChuyen,kind:"chuyen"});
+    const ly=p.lyDo;
+    if(isTransferReason(ly)){
+      if(p._destUnit){
+        // có liên kết nơi đến/đi: xác định chính xác từ/đến
+        const from = ly==="Điều động đi"? u.name : p._destUnit;
+        const to   = ly==="Điều động đi"? p._destUnit : u.name;
+        if(inGroup(to)&&!inGroup(from))
+          incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đến từ ngoài nhóm",done:!!p._hoSoNop,kind:"nop"});
+        else if(inGroup(from)&&!inGroup(to))
+          outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from,to,reason:"Điều động đi ra ngoài nhóm",done:!!p._hoSoChuyen,kind:"chuyen"});
+      }else if(here){
+        // mất liên kết (file nạp lại): nhận diện theo nhóm của chính đơn vị này
+        if(ly==="Điều động đi")
+          outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"(đơn vị khác)",reason:"Điều động đi",done:!!p._hoSoChuyen,kind:"chuyen"});
+        else
+          incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"(đơn vị khác)",to:u.name,reason:"Điều động đến",done:!!p._hoSoNop,kind:"nop"});
+      }
     }
-    // Tiếp nhận / Tuyển dụng vào đơn vị trong nhóm -> phải THU hồ sơ (nộp về)
-    if(here && p.lyDo==="Tiếp nhận / Tuyển dụng" && p.tangGiam!=="Giảm"){
+    // Tiếp nhận / Tuyển dụng vào đơn vị trong nhóm -> THU hồ sơ
+    if(here && ly==="Tiếp nhận / Tuyển dụng" && p.tangGiam!=="Giảm"){
       if(!incoming.some(it=>it.p===p))
         incoming.push({p,who:p.hoTen,ns:p.ngaySinh,from:"—",to:u.name,reason:"Tiếp nhận / Tuyển dụng vào nhóm",done:!!p._hoSoNop,kind:"nop"});
     }
-    // Chuyển công tác từ đơn vị trong nhóm -> phải BÀN GIAO hồ sơ đi
-    if(here && p.lyDo==="Chuyển công tác"){
+    // Chuyển công tác từ đơn vị trong nhóm -> BÀN GIAO hồ sơ
+    if(here && ly==="Chuyển công tác"){
       if(!outgoing.some(it=>it.p===p))
         outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"—",reason:"Chuyển công tác (bàn giao hồ sơ)",done:!!p._hoSoChuyen,kind:"chuyen"});
     }
