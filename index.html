@@ -201,8 +201,9 @@ function groupUnitNames(){
   if(!STATE)return [];
   const cc=STATE.units.filter(u=>u.kind!=="VC").map(u=>u.name);
   const norm=s=>String(s).replace(/\([^)]*\)/g,"").replace(/\s+/g," ").trim().toLowerCase();
-  const si=cc.findIndex(n=>norm(n)==="vụ tổ chức cán bộ");
-  const ei=cc.findIndex(n=>norm(n)==="ktnn chuyên ngành vii");
+  const si=cc.findIndex(n=>norm(n).includes("tổ chức cán bộ"));
+  let ei=cc.findIndex(n=>norm(n).includes("chuyên ngành vii"));
+  if(ei<0) ei=cc.findIndex(n=>norm(n).includes("chuyên ngành 7"));
   if(si<0||ei<0)return [];
   return cc.slice(si, ei+1);
 }
@@ -510,7 +511,7 @@ function collectHoSo(){
   }));
   return {incoming,outgoing};
 }
-function hoSoWarnCount(){const {incoming,outgoing}=collectHoSo();return incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;}
+function hoSoWarnCount(){try{const {incoming,outgoing}=collectHoSo();return incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;}catch(e){console.error("hoSo",e);return 0;}}
 function renderHoSo(){
   const frag=document.createDocumentFragment();
   const {incoming,outgoing}=collectHoSo();
@@ -565,6 +566,7 @@ function hoSoTable(title,items,kind,doneLabel){
 function render(){
   applyRetirements();
   rebuildTransfers();
+  if(STATE && (!STATE._group || !STATE._group.length)) STATE._group=groupUnitNames();
   QH_IDX = STATE ? qhIndex() : null;
   renderTabs();
   const v=$("#view"); v.innerHTML="";
@@ -1598,7 +1600,7 @@ async function restoreBackup(file){
     if(d._type!=="THONGKE_NS_BACKUP"||!d.state) throw new Error("Sai định dạng");
     STATE=d.state; HISTORY=d.history||[]; RETIRE_MAP=d.retire||{};
     ORIGINAL_BUF=d.originalB64? b64ToBuf(d.originalB64): null;
-    if(!STATE._group) STATE._group=groupUnitNames();
+    if(!STATE._group || !STATE._group.length) STATE._group=groupUnitNames();
     try{ await kvSet("originalBuf",ORIGINAL_BUF); }catch(_){}
     await saveAll();
     ACTIVE_TAB="dashboard";
