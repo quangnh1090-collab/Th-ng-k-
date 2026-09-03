@@ -1515,18 +1515,23 @@ function openCloseMonth(){
   }else{
     detailNode=el("div",{class:"mini"},"Không có ai bị xóa — chỉ reset biến động.");
   }
+  const defTarget=nextMonth(STATE.trackingMonth);
+  const monthInp=el("input",{type:"month",value:defTarget,style:"padding:6px 10px;font-size:15px;border:1px solid var(--line);border-radius:6px"});
   const body=el("div",{},
-    el("p",{},`Chốt ${monthLabel(STATE.trackingMonth)} và chuyển sang ${monthLabel(nextMonth(STATE.trackingMonth))}.`),
+    el("p",{},`Đang chốt: `,el("strong",{},monthLabel(STATE.trackingMonth)),`.`),
+    el("div",{class:"row",style:"gap:8px;align-items:center;margin:8px 0"},
+      el("span",{},"Chuyển sang tháng:"),monthInp,
+      el("span",{class:"mini"},"(mặc định là tháng liền kề)")),
     el("p",{},el("strong",{},`${leavers} người`)," đã đánh dấu Giảm sẽ bị xóa khỏi danh sách. Số người còn lại trở thành số đầu kỳ tháng mới."),
     detailNode,
     el("div",{class:"alert warn",style:"margin-top:12px"},"Số liệu tháng hiện tại sẽ được lưu vào Lịch sử để xuất lại Excel. Bạn có thể Hoàn tác ngay sau khi chốt.")
   );
   modal("Xác nhận chốt tháng",body,[
     {label:"Hủy",cls:"btn"},
-    {label:"Chốt tháng",cls:"btn warn",onClick:doCloseMonth}
+    {label:"Chốt tháng",cls:"btn warn",onClick:()=>doCloseMonth(monthInp.value||defTarget)}
   ]);
 }
-function doCloseMonth(){
+function doCloseMonth(target){
   // 0) "chốt" các dòng luân chuyển: biến dòng tự động thành chính thức, gỡ liên kết
   STATE.units.forEach(u=>u.cc.forEach(p=>{ delete p._mirror; delete p._destUnit; }));
   // 0b) GIỮ LẠI hồ sơ CHƯA tích xong -> mang sang tháng mới cho tới khi hoàn thành
@@ -1560,7 +1565,7 @@ function doCloseMonth(){
     u.hd.forEach(p=>{p.tangGiam="";p.lyDo="";});
     u.baseC=u.cc.length; // số đầu kỳ = số người còn lại
   });
-  STATE.trackingMonth=nextMonth(STATE.trackingMonth);
+  STATE.trackingMonth = (target && /^\d{4}-\d{2}$/.test(target)) ? target : nextMonth(STATE.trackingMonth);
   markDirty();render();
   toast("Đã chốt tháng. Sang "+monthLabel(STATE.trackingMonth));
 }
