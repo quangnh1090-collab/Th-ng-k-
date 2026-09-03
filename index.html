@@ -315,10 +315,11 @@ async function importFile(file){
   const keepQH   = (STATE&&STATE.quyHoach)   ? STATE.quyHoach   : [];
   const keepRet  = (STATE&&STATE.retired)    ? STATE.retired    : [];
   const keepLeft = (STATE&&STATE.leftArchive)? STATE.leftArchive: [];
+  const keepPend = (STATE&&STATE.pendingHoSo) ? STATE.pendingHoSo : [];
 
   STATE={ fileName:file.name, importedAt:Date.now(), trackingMonth:todayMonth(), reminderDays:60, units, v:2,
           ccReserve:bases.ccReserve||0, vcReserve:bases.vcReserve||0,
-          quyHoach:keepQH, retired:keepRet, leftArchive:keepLeft };
+          quyHoach:keepQH, retired:keepRet, leftArchive:keepLeft, pendingHoSo:keepPend };
   STATE._group=groupUnitNames();
   ORIGINAL_BUF=buf.slice(0);
   try{ await kvSet("originalBuf",ORIGINAL_BUF); }catch(_){}
@@ -520,6 +521,15 @@ function collectHoSo(){
       outgoing.push({p,who:p.hoTen,ns:p.ngaySinh,from:u.name,to:"—",reason:"Chuyển công tác → chuyển hồ sơ đi",done:!!p._hoSoChuyen,kind:"chuyen"});
     }
   }));
+  const addId=arr=>arr.forEach(it=>{ it.id=it.kind+"|"+stripAccent(it.who)+"|"+String(it.ns||""); });
+  addId(incoming); addId(outgoing);
+  // Gộp thêm hồ sơ TỒN ĐỌNG từ các tháng trước (chưa tích xong), tránh trùng với mục tháng này
+  const curIds=new Set([...incoming,...outgoing].map(it=>it.id));
+  (STATE.pendingHoSo||[]).forEach(x=>{
+    if(x.done || curIds.has(x.id))return;
+    const it=Object.assign({},x,{_pending:true});
+    if(x.kind==="nop") incoming.push(it); else outgoing.push(it);
+  });
   return {incoming,outgoing};
 }
 function hoSoWarnCount(){try{const {incoming,outgoing}=collectHoSo();return incoming.filter(i=>!i.done).length+outgoing.filter(o=>!o.done).length;}catch(e){console.error("hoSo",e);return 0;}}
@@ -555,14 +565,24 @@ function hoSoTable(title,items,kind,doneLabel){
     const tr=el("tr",{});
     if(!it.done) tr.style.background="#fff7ed";
     tr.appendChild(el("td",{class:"num"},String(i+1)));
-    tr.appendChild(el("td",{},el("strong",{},it.who||"(trống)")));
+    const nameCell=el("td",{},el("strong",{},it.who||"(trống)"));
+    if(it._pending) nameCell.appendChild(el("span",{class:"tag",style:"background:#fde68a;color:#92400e"},"tồn từ "+monthLabel(it.month)));
+    tr.appendChild(nameCell);
     tr.appendChild(el("td",{},it.ns||""));
     tr.appendChild(el("td",{},(it.from||"—")+" → "+(it.to||"—")));
     tr.appendChild(el("td",{class:"mini"},it.reason));
     const cell=el("td",{});
     const lab=el("label",{style:"display:inline-flex;gap:6px;align-items:center;cursor:pointer"});
     const cb=el("input",{type:"checkbox"}); cb.checked=it.done;
-    cb.addEventListener("change",()=>{ if(kind==="nop")it.p._hoSoNop=cb.checked; else it.p._hoSoChuyen=cb.checked; markDirty(); render(); });
+    cb.addEventListener("change",()=>{
+      if(it._pending){
+        // mục tồn đọng: tích xong -> gỡ khỏi danh sách tồn đọng
+        STATE.pendingHoSo=(STATE.pendingHoSo||[]).filter(x=>x.id!==it.id);
+      }else{
+        if(kind==="nop")it.p._hoSoNop=cb.checked; else it.p._hoSoChuyen=cb.checked;
+      }
+      markDirty(); render();
+    });
     lab.appendChild(cb); lab.appendChild(el("span",{},it.done?doneLabel:el("span",{style:"color:#b45309"},"Chưa — "+doneLabel.toLowerCase())));
     cell.appendChild(lab);
     tr.appendChild(cell);
@@ -1509,6 +1529,17 @@ function openCloseMonth(){
 function doCloseMonth(){
   // 0) "chốt" các dòng luân chuyển: biến dòng tự động thành chính thức, gỡ liên kết
   STATE.units.forEach(u=>u.cc.forEach(p=>{ delete p._mirror; delete p._destUnit; }));
+  // 0b) GIỮ LẠI hồ sơ CHƯA tích xong -> mang sang tháng mới cho tới khi hoàn thành
+  if(!STATE.pendingHoSo) STATE.pendingHoSo=[];
+  try{
+    const hs=collectHoSo();
+    [...hs.incoming,...hs.outgoing].forEach(it=>{
+      if(it.done)return;                                  // đã xong thì bỏ, không mang theo
+      if(STATE.pendingHoSo.some(x=>x.id===it.id))return;  // đã có trong tồn đọng
+      STATE.pendingHoSo.push({id:it.id,who:it.who,ns:it.ns,from:it.from,to:it.to,
+        reason:it.reason,kind:it.kind,month:it._pending?it.month:STATE.trackingMonth,done:false});
+    });
+  }catch(e){console.error("carry hoSo",e);}
   // 1) lưu snapshot tháng hiện tại
   HISTORY.push(snapshotCurrent());
   // 2) LƯU TRỮ người sẽ bị xóa (nghỉ hưu & các trường hợp giảm khác) trước khi xóa
