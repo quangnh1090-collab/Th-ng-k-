@@ -317,7 +317,10 @@ async function importFile(file){
   const keepLeft = (STATE&&STATE.leftArchive)? STATE.leftArchive: [];
   const keepPend = (STATE&&STATE.pendingHoSo) ? STATE.pendingHoSo : [];
 
-  STATE={ fileName:file.name, importedAt:Date.now(), trackingMonth:todayMonth(), reminderDays:60, units, v:2,
+  // Đoán tháng theo dõi từ TÊN FILE (vd ThongKe_NhanSu_2026-08...), nếu không có thì lấy tháng hiện tại
+  const fmatch = String(file.name||"").match(/(20\d{2})[-_](0[1-9]|1[0-2])(?!\d)/);
+  const detectedMonth = fmatch ? (fmatch[1]+"-"+fmatch[2]) : todayMonth();
+  STATE={ fileName:file.name, importedAt:Date.now(), trackingMonth:detectedMonth, reminderDays:60, units, v:2,
           ccReserve:bases.ccReserve||0, vcReserve:bases.vcReserve||0,
           quyHoach:keepQH, retired:keepRet, leftArchive:keepLeft, pendingHoSo:keepPend };
   STATE._group=groupUnitNames();
@@ -601,7 +604,13 @@ function render(){
   QH_IDX = STATE ? qhIndex() : null;
   renderTabs();
   const v=$("#view"); v.innerHTML="";
-  $("#monthStatus").textContent = STATE? ("Tháng theo dõi: "+monthLabel(STATE.trackingMonth)) : "";
+  const ms=$("#monthStatus");
+  if(STATE){
+    ms.innerHTML="";
+    ms.appendChild(el("span",{},"Tháng theo dõi: "));
+    ms.appendChild(el("strong",{},monthLabel(STATE.trackingMonth)));
+    ms.appendChild(el("button",{class:"btn sm ghost",style:"margin-left:8px;padding:2px 8px",onclick:editTrackingMonth,title:"Đổi tháng theo dõi"},"✎ đổi"));
+  } else ms.textContent="";
   if(!STATE){ v.appendChild(renderImport()); return; }
   if(ACTIVE_TAB==="dashboard") v.appendChild(renderDashboard());
   else if(ACTIVE_TAB==="units") v.appendChild(renderUnits());
@@ -1504,6 +1513,15 @@ function renderHistory(){
 function snapshotCurrent(){
   return {month:STATE.trackingMonth,label:monthLabel(STATE.trackingMonth),savedAt:Date.now(),
     snapshot:JSON.parse(JSON.stringify({trackingMonth:STATE.trackingMonth,units:STATE.units}))};
+}
+function editTrackingMonth(){
+  if(!STATE)return;
+  const inp=el("input",{type:"month",value:STATE.trackingMonth,style:"padding:6px 10px;font-size:15px;border:1px solid var(--line);border-radius:6px"});
+  modal("Đổi tháng theo dõi", el("div",{},
+      el("p",{},"Chọn tháng mà dữ liệu hiện tại đang phản ánh. Việc này chỉ đổi nhãn tháng, không thay đổi số liệu."),
+      el("div",{class:"row",style:"align-items:center;gap:8px"},el("span",{},"Tháng:"),inp)),
+    [{label:"Hủy",cls:"btn"},
+     {label:"Lưu",cls:"btn primary",onClick:()=>{ if(/^\d{4}-\d{2}$/.test(inp.value)){ STATE.trackingMonth=inp.value; markDirty(); render(); toast("Đã đổi sang "+monthLabel(STATE.trackingMonth)); } }}]);
 }
 function openCloseMonth(){
   let leavers=0;const detail=[];
