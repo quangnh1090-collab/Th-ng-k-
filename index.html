@@ -1761,6 +1761,8 @@ async function doExport(snap, month){
     if(added.length) done+=added.length;
     // (6) Bảng tổng hợp: CHỈ GHI SỐ, KHÔNG CÔNG THỨC — đúng như bảng trên màn hình
     if(nameToPath["4-2026"]) await rewriteSummaryValues(zip, snap, owb, nameToPath, added);
+    // (7) Toàn bộ file: tính sẵn mọi công thức còn lại và GHI THÀNH SỐ (không còn công thức)
+    await flattenAllFormulas(zip);
     const _n=new Date(), _p=x=>String(x).padStart(2,"0");
     const _stamp=`${_p(_n.getDate())}-${_p(_n.getMonth()+1)}_${_p(_n.getHours())}h${_p(_n.getMinutes())}`;
     const out=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
@@ -1877,7 +1879,7 @@ function patchSummaryValues(xml, snap, fws){
   // Công thức "shared" có ô gốc vừa bị thay bằng số -> chuyển các ô phụ thuộc còn lại thành công thức thường
   if(removedSi.size && fws){
     for(const [n,rs] of rows){
-      const nrs=rs.replace(/<c r="([A-Z]+\d+)"([^>]*?)>([\s\S]*?)<\/c>/g,(m,ref,attrs,inner)=>{
+      const nrs=rs.replace(/<c r="([A-Z]+\d+)"([^>]*?)(?<!\/)>([\s\S]*?)<\/c>/g,(m,ref,attrs,inner)=>{
         if(touched.has(ref))return m;
         const fm=inner.match(/<f\b([^>]*?)\/>/); if(!fm||!/\bt="shared"/.test(fm[1]))return m;
         const k=(fm[1].match(/\bsi="(\d+)"/)||[])[1]; if(!removedSi.has(k))return m;
@@ -1938,7 +1940,7 @@ function insertSummaryRows(xml, at, k, sumName){
 // Đổi mọi công thức "shared" của sheet thành công thức thường (để dời dòng an toàn)
 function unshareFormulas(xml, fws){
   if(!fws) return xml;
-  return xml.replace(/<c r="([A-Z]+\d+)"([^>]*?)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
+  return xml.replace(/<c r="([A-Z]+\d+)"([^>]*?)(?<!\/)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
     const fm=inner.match(/<f\b([^>]*?)(?:\/>|>[\s\S]*?<\/f>)/); if(!fm||!/\bt="shared"/.test(fm[1]))return m;
     const c=fws[ref]; if(!c||!c.f) return m;
     return m.replace(fm[0],'<f>'+xmlEsc(c.f)+'</f>');
@@ -2062,7 +2064,7 @@ function blankRowFrom(tpl,n){
     .replace(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g,(m,c,a)=>{const s=(a.match(/\bs="\d+"/)||[""])[0];return '<c r="'+c+n+'"'+(s?" "+s:"")+'/>';});
 }
 function stripFormulas(xml){   // bỏ mọi công thức, giữ lại giá trị
-  return xml.replace(/<c r="([A-Z]+\d+)"([^>]*?)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
+  return xml.replace(/<c r="([A-Z]+\d+)"([^>]*?)(?<!\/)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
     if(!/<f\b/.test(inner)) return m;
     const v=(inner.match(/<v>([\s\S]*?)<\/v>/)||[])[1];
     const t=(a.match(/\bt="([^"]*)"/)||[])[1];
@@ -2175,6 +2177,200 @@ async function rewriteSummaryValues(zip, snap, owb, nameToPath, added){
     xml=xml.replace(/(<\/sheetData>(?:[\s\S]*?<(?:sheetCalcPr|sheetProtection|protectedRanges|scenarios|autoFilter|sortState|dataConsolidate|customSheetViews|mergeCells|phoneticPr|conditionalFormatting|dataValidations)\b[\s\S]*?(?:\/>|<\/(?:sheetCalcPr|sheetProtection|protectedRanges|scenarios|autoFilter|sortState|dataConsolidate|customSheetViews|mergeCells|phoneticPr|conditionalFormatting|dataValidations)>))*)/, '$1<hyperlinks>'+newLinks+'</hyperlinks>');
   }
   zip.file(path, xml);
+}
+/* ===================== Tính công thức trong trình duyệt & ghi thành giá trị ===================== */
+// Hỗ trợ: SUM, COUNTA, COUNT, COUNTIF, COUNTIFS, SUMIF, SUMIFS, IF, IFERROR, AND, OR, NOT, ROW, COLUMN, ABS, MAX, MIN, ROUND, LEN, TRIM, UPPER, LOWER
+const FERR={err:"#VALUE!"};
+function fTokenize(f){
+  const T=[]; let i=0; const s=String(f);
+  const RX=[
+    ["str",/^"((?:[^"]|"")*)"/],
+    ["ref",/^((?:'(?:[^']|'')+'|[A-Za-z_\u00C0-\u1EF9][\w.\u00C0-\u1EF9]*)!)?(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)(?![\w(])/],
+    ["col",/^((?:'(?:[^']|'')+'|[A-Za-z_\u00C0-\u1EF9][\w.\u00C0-\u1EF9]*)!)?(\$?[A-Z]{1,3}:\$?[A-Z]{1,3})(?![\w(])/],
+    ["num",/^\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?/],
+    ["fn",/^([A-Za-z_][\w.]*)\s*\(/],
+    ["bool",/^(TRUE|FALSE)(?![\w(])/i],
+    ["op",/^(<>|<=|>=|[-+*\/^&=<>%(),;])/],
+  ];
+  while(i<s.length){
+    if(/\s/.test(s[i])){i++;continue;}
+    const rest=s.slice(i); let hit=null;
+    for(const [k,re] of RX){const m=rest.match(re); if(m){hit=[k,m];break;}}
+    if(!hit) throw new Error("tok:"+rest.slice(0,10));
+    const [k,m]=hit;
+    if(k==="str") T.push({k,v:m[1].replace(/""/g,'"')});
+    else if(k==="ref"||k==="col") T.push({k,sheet:m[1]?_sheetNameOf(m[1]):null,v:m[2].replace(/\$/g,"")});
+    else if(k==="num") T.push({k,v:+m[0]});
+    else if(k==="fn") T.push({k,v:m[1].toUpperCase()});
+    else if(k==="bool") T.push({k,v:m[1].toUpperCase()==="TRUE"});
+    else T.push({k:"op",v:m[1]===";"?",":m[1]});
+    i+=m[0].length;
+  }
+  return T;
+}
+function fParse(T){
+  let p=0; const pk=()=>T[p], nx=()=>T[p++];
+  const isOp=v=>pk()&&pk().k==="op"&&pk().v===v;
+  function expr(){ let a=cat(); while(pk()&&pk().k==="op"&&["=","<>","<",">","<=",">="].includes(pk().v)){const o=nx().v;a={t:"bin",o,a,b:cat()};} return a; }
+  function cat(){ let a=add(); while(isOp("&")){nx();a={t:"bin",o:"&",a,b:add()};} return a; }
+  function add(){ let a=mul(); while(isOp("+")||isOp("-")){const o=nx().v;a={t:"bin",o,a,b:mul()};} return a; }
+  function mul(){ let a=pw(); while(isOp("*")||isOp("/")){const o=nx().v;a={t:"bin",o,a,b:pw()};} return a; }
+  function pw(){ let a=un(); while(isOp("^")){nx();a={t:"bin",o:"^",a,b:un()};} return a; }
+  function un(){ if(isOp("-")){nx();return {t:"neg",a:un()};} if(isOp("+")){nx();return un();} let a=prim(); if(isOp("%")){nx();a={t:"bin",o:"/",a,b:{t:"lit",v:100}};} return a; }
+  function prim(){
+    const t=nx(); if(!t) throw new Error("eof");
+    if(t.k==="num"||t.k==="str"||t.k==="bool") return {t:"lit",v:t.v};
+    if(t.k==="ref"||t.k==="col") return {t:t.k,sheet:t.sheet,v:t.v};
+    if(t.k==="fn"){ const args=[]; if(isOp(")")){nx();return {t:"fn",n:t.v,args};}
+      for(;;){ if(isOp(",")){args.push({t:"lit",v:null});nx();continue;} args.push(expr()); if(isOp(",")){nx();if(isOp(")")){args.push({t:"lit",v:null});}continue;} if(isOp(")")){nx();break;} throw new Error("args"); }
+      return {t:"fn",n:t.v,args}; }
+    if(t.k==="op"&&t.v==="("){ const e=expr(); if(!isOp(")"))throw new Error(")"); nx(); return e; }
+    throw new Error("prim");
+  }
+  const e=expr(); if(p<T.length) throw new Error("trail"); return e;
+}
+function makeFormulaEngine(wb){
+  const memo=new Map(), busy=new Set(), astCache=new Map();
+  const maxRow={}; wb.SheetNames.forEach(n=>{const ws=wb.Sheets[n]; maxRow[n]=ws&&ws["!ref"]?XLSX.utils.decode_range(ws["!ref"]).e.r:0;});
+  const findSheet=n=>{ if(wb.Sheets[n])return n; const l=String(n).toLowerCase(); return wb.SheetNames.find(x=>x.toLowerCase()===l)||null; };
+  function cellV(sh,r,c){                       // -> {v, f:boolean}
+    const ws=wb.Sheets[sh]; if(!ws) return {v:FERR,f:false};
+    const a=XLSX.utils.encode_cell({r,c}), cell=ws[a];
+    if(!cell) return {v:null,f:false};
+    if(cell.f){ return {v:evalCell(sh,a,cell), f:true}; }
+    if(cell.t==="z"||cell.v===undefined) return {v:null,f:false};
+    if(cell.t==="e") return {v:FERR,f:false};
+    return {v:cell.v,f:false};
+  }
+  function evalCell(sh,a,cell){
+    const key=sh+"!"+a; if(memo.has(key)) return memo.get(key);
+    if(busy.has(key)) return FERR;
+    busy.add(key);
+    let v;
+    try{
+      let ast=astCache.get(cell.f); if(!ast){ ast=fParse(fTokenize(cell.f)); astCache.set(cell.f,ast); }
+      const {r,c}=XLSX.utils.decode_cell(a);
+      v=ev(ast,{sh,r,c});
+      if(v&&v.range) v=scalar(v);
+    }catch(e){ v=FERR; }
+    busy.delete(key); memo.set(key,v); return v;
+  }
+  const isErr=v=>v&&typeof v==="object"&&v.err;
+  function rangeOf(node,ctx){
+    const sh=node.sheet?findSheet(node.sheet):ctx.sh; if(!sh) return null;
+    if(node.t==="col"){ const [a,b]=node.v.split(":"); return {range:true,sh,r1:0,r2:maxRow[sh],c1:XLSX.utils.decode_col(a),c2:XLSX.utils.decode_col(b)}; }
+    const [a,b]=node.v.split(":"); const A=XLSX.utils.decode_cell(a), B=XLSX.utils.decode_cell(b||a);
+    return {range:true,sh,r1:Math.min(A.r,B.r),r2:Math.max(A.r,B.r),c1:Math.min(A.c,B.c),c2:Math.max(A.c,B.c)};
+  }
+  function cells(rg){ const out=[]; if(!rg||!rg.range) return out; const mr=maxRow[rg.sh]??rg.r2; const r2=Math.min(rg.r2,Math.max(mr,rg.r1));
+    for(let r=rg.r1;r<=r2;r++) for(let c=rg.c1;c<=rg.c2;c++) out.push(cellV(rg.sh,r,c)); return out; }
+  function scalar(v){ if(v&&v.range){ return cellV(v.sh,v.r1,v.c1).v; } return v; }
+  const num=v=>{ v=scalar(v); if(isErr(v))return v; if(v==null||v==="")return 0; if(typeof v==="boolean")return v?1:0; if(typeof v==="number")return v; const n=Number(String(v).trim()); return isNaN(n)?FERR:n; };
+  const str=v=>{ v=scalar(v); if(v==null)return ""; if(typeof v==="boolean")return v?"TRUE":"FALSE"; return String(v); };
+  const truthy=v=>{ v=scalar(v); if(typeof v==="string"){const u=v.toUpperCase(); if(u==="TRUE")return true; if(u==="FALSE")return false; return !isNaN(+v)&&+v!==0;} return !!num(v); };
+  function cmp(a,b,o){
+    a=scalar(a); b=scalar(b); if(isErr(a))return a; if(isErr(b))return b;
+    const nA=a==null?(typeof b==="string"?"":0):a, nB=b==null?(typeof a==="string"?"":0):b;
+    let d;
+    if(typeof nA==="number"&&typeof nB==="number") d=nA-nB;
+    else if(typeof nA==="string"&&typeof nB==="string"){ const x=nA.toLowerCase(), y=nB.toLowerCase(); d=x<y?-1:x>y?1:0; }
+    else if(typeof nA==="boolean"&&typeof nB==="boolean") d=(nA?1:0)-(nB?1:0);
+    else d = (typeof nA==="number")?-1:(typeof nB==="number")?1:(typeof nA==="string"?-1:1);
+    return o==="="?d===0:o==="<>"?d!==0:o==="<"?d<0:o===">"?d>0:o==="<="?d<=0:d>=0;
+  }
+  function crit(c){                             // -> fn(cell{v,f}) => bool
+    c=scalar(c);
+    if(typeof c==="number"||typeof c==="boolean") return x=>x.v===c || (typeof x.v==="string"&&x.v.trim()!==""&&+x.v===c);
+    c=str(c); let m=c.match(/^(<>|<=|>=|=|<|>)?([\s\S]*)$/); const op=m[1]||"=", rv=m[2];
+    if(rv===""){ if(op==="=") return x=>x.v==null||x.v===""; if(op==="<>") return x=>!(x.v==null) && !(x.v===""&&!x.f); return ()=>false; }
+    const rn=Number(rv), isN=rv.trim()!==""&&!isNaN(rn);
+    const wild=/[*?]/.test(rv)&&(op==="="||op==="<>");
+    const re=wild?new RegExp("^"+rv.replace(/[.+^${}()|[\]\\]/g,"\\$&").replace(/~\*/g,"\u0001").replace(/~\?/g,"\u0002").replace(/\*/g,"[\\s\\S]*").replace(/\?/g,".").replace(/\u0001/g,"\\*").replace(/\u0002/g,"\\?")+"$","i"):null;
+    return x=>{
+      const v=x.v;
+      if(isN && typeof v==="number"){ const d=v-rn; return op==="="?d===0:op==="<>"?d!==0:op==="<"?d<0:op===">"?d>0:op==="<="?d<=0:d>=0; }
+      if(op==="="||op==="<>"){
+        if(v==null) return op==="<>";
+        const sv=String(v); const eq= re? re.test(sv) : sv.toLowerCase()===rv.toLowerCase();
+        return op==="="?eq:!eq;
+      }
+      if(isN || typeof v!=="string") return false;
+      const a=v.toLowerCase(), b=rv.toLowerCase(), d=a<b?-1:a>b?1:0;
+      return op==="<"?d<0:op===">"?d>0:op==="<="?d<=0:d>=0;
+    };
+  }
+  const flat=(args,ctx)=>{ const out=[]; args.forEach(a=>{ const v=ev(a,ctx); if(v&&v.range) cells(v).forEach(x=>out.push({...x,ref:true})); else out.push({v,f:false,ref:false}); }); return out; };
+  const FN={
+    SUM:(a,ctx)=>{let s=0; for(const x of flat(a,ctx)){ if(isErr(x.v))return x.v; if(x.ref){ if(typeof x.v==="number")s+=x.v; } else { const n=num(x.v); if(isErr(n))return n; s+=n; } } return s;},
+    COUNTA:(a,ctx)=>flat(a,ctx).filter(x=>!(x.v==null)).length,
+    COUNT:(a,ctx)=>flat(a,ctx).filter(x=>typeof x.v==="number").length,
+    COUNTIF:(a,ctx)=>{const rg=ev(a[0],ctx), f=crit(ev(a[1],ctx)); return cells(rg).filter(f).length;},
+    COUNTIFS:(a,ctx)=>{ const prs=[]; for(let i=0;i<a.length;i+=2) prs.push([cells(ev(a[i],ctx)),crit(ev(a[i+1],ctx))]);
+      if(!prs.length)return 0; const n=prs[0][0].length; let k=0; for(let i=0;i<n;i++){ if(prs.every(([cs,f])=>cs[i]&&f(cs[i]))) k++; } return k; },
+    SUMIF:(a,ctx)=>{const cs=cells(ev(a[0],ctx)), f=crit(ev(a[1],ctx)), ss=a[2]?cells(ev(a[2],ctx)):cs; let s=0; cs.forEach((x,i)=>{ if(f(x)&&ss[i]&&typeof ss[i].v==="number") s+=ss[i].v; }); return s;},
+    SUMIFS:(a,ctx)=>{const ss=cells(ev(a[0],ctx)); const prs=[]; for(let i=1;i<a.length;i+=2) prs.push([cells(ev(a[i],ctx)),crit(ev(a[i+1],ctx))]); let s=0; ss.forEach((x,i)=>{ if(typeof x.v==="number"&&prs.every(([cs,f])=>cs[i]&&f(cs[i]))) s+=x.v; }); return s;},
+    IF:(a,ctx)=>{ const c=scalar(ev(a[0],ctx)); if(isErr(c))return c; return truthy(c) ? (a[1]?scalar(ev(a[1],ctx)):true) : (a[2]?scalar(ev(a[2],ctx)):false); },
+    IFERROR:(a,ctx)=>{ const v=scalar(ev(a[0],ctx)); return isErr(v)?scalar(ev(a[1],ctx)):v; },
+    AND:(a,ctx)=>flat(a,ctx).every(x=>truthy(x.v)), OR:(a,ctx)=>flat(a,ctx).some(x=>truthy(x.v)), NOT:(a,ctx)=>!truthy(ev(a[0],ctx)),
+    ROW:(a,ctx)=>{ if(!a.length) return ctx.r+1; const rg=ev(a[0],ctx); return rg&&rg.range?rg.r1+1:FERR; },
+    COLUMN:(a,ctx)=>{ if(!a.length) return ctx.c+1; const rg=ev(a[0],ctx); return rg&&rg.range?rg.c1+1:FERR; },
+    ABS:(a,ctx)=>{const n=num(ev(a[0],ctx));return isErr(n)?n:Math.abs(n);},
+    MAX:(a,ctx)=>{const v=flat(a,ctx).map(x=>x.v).filter(v=>typeof v==="number"); return v.length?Math.max(...v):0;},
+    MIN:(a,ctx)=>{const v=flat(a,ctx).map(x=>x.v).filter(v=>typeof v==="number"); return v.length?Math.min(...v):0;},
+    ROUND:(a,ctx)=>{const n=num(ev(a[0],ctx)), d=a[1]?num(ev(a[1],ctx)):0; if(isErr(n))return n; const m=Math.pow(10,d); return Math.round(n*m)/m;},
+    LEN:(a,ctx)=>str(ev(a[0],ctx)).length, TRIM:(a,ctx)=>str(ev(a[0],ctx)).trim().replace(/\s+/g," "),
+    UPPER:(a,ctx)=>str(ev(a[0],ctx)).toUpperCase(), LOWER:(a,ctx)=>str(ev(a[0],ctx)).toLowerCase(),
+  };
+  function ev(n,ctx){
+    switch(n.t){
+      case "lit": return n.v;
+      case "ref": case "col": { const rg=rangeOf(n,ctx); if(!rg) return FERR; if(rg.r1===rg.r2&&rg.c1===rg.c2&&n.t==="ref"&&n.v.indexOf(":")<0) return cellV(rg.sh,rg.r1,rg.c1).v; return rg; }
+      case "neg": { const x=num(ev(n.a,ctx)); return isErr(x)?x:-x; }
+      case "fn": { const f=FN[n.n]; if(!f) throw new Error("fn "+n.n); return f(n.args,ctx); }
+      case "bin": {
+        const A=ev(n.a,ctx), B=ev(n.b,ctx);
+        if(n.o==="&"){ const a=scalar(A), b=scalar(B); if(isErr(a))return a; if(isErr(b))return b; return str(a)+str(b); }
+        if(["=","<>","<",">","<=",">="].includes(n.o)) return cmp(A,B,n.o);
+        const a=num(A), b=num(B); if(isErr(a))return a; if(isErr(b))return b;
+        if(n.o==="+")return a+b; if(n.o==="-")return a-b; if(n.o==="*")return a*b; if(n.o==="^")return Math.pow(a,b);
+        if(n.o==="/") return b===0?FERR:a/b;
+      }
+    }
+    throw new Error("node");
+  }
+  return { value:(sh,a)=>{ const ws=wb.Sheets[sh]; const cell=ws&&ws[a]; if(!cell||!cell.f) return undefined; return evalCell(sh,a,cell); } };
+}
+async function flattenAllFormulas(zip){
+  // 1) đọc lại file vừa dựng để có mô hình ô (kể cả công thức shared đã được dịch)
+  const buf=await zip.generateAsync({type:"uint8array"});
+  const wb=XLSX.read(buf,{type:"array",cellFormula:true,cellNF:false,cellHTML:false,cellText:false});
+  const eng=makeFormulaEngine(wb);
+  // 2) tên sheet -> đường dẫn
+  const wx=await zip.file("xl/workbook.xml").async("string"), rx=await zip.file("xl/_rels/workbook.xml.rels").async("string");
+  const rels={}; rx.replace(/<Relationship\b([^>]*?)\/?>/g,(m,a)=>{const id=(a.match(/Id="([^"]+)"/)||[])[1],tg=(a.match(/Target="([^"]+)"/)||[])[1]; if(id&&tg)rels[id]=tg; return m;});
+  const paths={}; wx.replace(/<sheet\b([^>]*?)\/?>/g,(m,a)=>{const nm=(a.match(/name="([^"]+)"/)||[])[1],rid=(a.match(/r:id="([^"]+)"/)||[])[1]; if(nm&&rid&&rels[rid]){let t=rels[rid].replace(/^\//,""); if(!t.startsWith("xl/"))t="xl/"+t; paths[xmlUnesc(nm)]=t;} return m;});
+  // 3) thay từng ô công thức bằng giá trị đã tính
+  let n=0;
+  for(const sh of wb.SheetNames){
+    const path=paths[sh]; if(!path||!zip.file(path)) continue;
+    let x=await zip.file(path).async("string"); if(x.indexOf("<f")<0) continue;
+    x=x.replace(/<c r="([A-Z]+\d+)"([^>]*?)(?<!\/)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
+      if(!/<f\b/.test(inner)) return m;
+      let v=eng.value(sh,ref);
+      if(v===undefined){ const cv=(inner.match(/<v>([\s\S]*?)<\/v>/)||[])[1]; v=cv==null?null:(isNaN(+cv)?xmlUnesc(cv):+cv); }
+      n++;
+      const s=(a.match(/\bs="\d+"/)||[""])[0], sa=s?" "+s:"";
+      if(v==null||v===""||(typeof v==="object")) return '<c r="'+ref+'"'+sa+'/>';
+      if(typeof v==="boolean") return '<c r="'+ref+'"'+sa+' t="b"><v>'+(v?1:0)+'</v></c>';
+      if(typeof v==="number") return isFinite(v)?'<c r="'+ref+'"'+sa+'><v>'+(Math.round(v*1e10)/1e10)+'</v></c>':'<c r="'+ref+'"'+sa+'/>';
+      return '<c r="'+ref+'"'+sa+' t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(v)+'</t></is></c>';
+    });
+    zip.file(path,x);
+  }
+  // không còn công thức -> bỏ cờ tính lại khi mở
+  let w2=await zip.file("xl/workbook.xml").async("string");
+  w2=w2.replace(/\s*fullCalcOnLoad="1"/,""); zip.file("xl/workbook.xml",w2);
+  return n;
 }
 function blankSummaryRows(xml, rowNums){
   const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/); if(!sdm)return xml;
