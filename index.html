@@ -358,6 +358,8 @@ function normUnit(s){return String(s).replace(/^VC\s*-\s*/i,"").replace(/\([^)]*
 function matchBase(bases,sheetName,isVC,idxInKind){
   const list = isVC ? bases.vc : bases.cc;
   if(!list||!list.length) return {C:0,E:0,R:0,W:0};
+  const ex=x=>String(x).replace(/^VC\s*-\s*/i,"").replace(/\s+/g," ").trim().toLowerCase();
+  for(const it of list){ if(ex(it.name)===ex(sheetName)) return it; }      // khớp đúng tên trước (tránh nhầm "V" với "V (mới)")
   const key=normUnit(sheetName);
   for(const it of list){ if(normUnit(it.name)===key) return it; }
   if(idxInKind!=null && idxInKind<list.length) return list[idxInKind];
@@ -1735,21 +1737,7 @@ async function doExport(snap, month){
         if(changed) zip.file(fpath,x);
       }
     }
-    // (3) Bảng tổng hợp: số nền + tên đơn vị (đổi tên) + ẩn tên đơn vị đã xóa
-    const sumPath=nameToPath["4-2026"];
-    if(sumPath && zip.file(sumPath)){
-      let sx=await zip.file(sumPath).async("string");
-      sx=patchSummaryBases(sx, snap.units);
-      sx=patchSummaryValues(sx, snap, owb.Sheets["4-2026"]);   // ghi đúng số liệu như trên màn hình
-      if(deleted.length){
-        const ob=parseSummaryBases(owb); const rowByName={};
-        ob.cc.forEach(b=>rowByName[b.name]=b.row);
-        ob.vc.forEach(b=>{ rowByName["VC - "+b.name]=b.row; });
-        const delRows=deleted.map(n=>rowByName[n]).filter(Boolean);
-        if(delRows.length) sx=blankSummaryRows(sx, delRows);
-      }
-      zip.file(sumPath, sx);
-    }
+    // (3) Bảng tổng hợp: dựng lại sau bước (5) — xem rewriteSummaryValues
     // (4) Workbook: đổi tên tab sheet + ẩn tab sheet đã xóa + buộc tính lại
     const wbpf=zip.file("xl/workbook.xml");
     if(wbpf){
@@ -1769,8 +1757,10 @@ async function doExport(snap, month){
       zip.file("xl/workbook.xml", wx);
     }
     // (5) Đơn vị THÊM MỚI trên app: tạo sheet riêng + chèn dòng vào bảng tổng hợp
-    const added = await addNewUnitsToZip(zip, snap, owb, nameToPath);
+    const added = await addNewUnitsToZip(zip, snap, owb, nameToPath, true);
     if(added.length) done+=added.length;
+    // (6) Bảng tổng hợp: CHỈ GHI SỐ, KHÔNG CÔNG THỨC — đúng như bảng trên màn hình
+    if(nameToPath["4-2026"]) await rewriteSummaryValues(zip, snap, owb, nameToPath, added);
     const _n=new Date(), _p=x=>String(x).padStart(2,"0");
     const _stamp=`${_p(_n.getDate())}-${_p(_n.getMonth()+1)}_${_p(_n.getHours())}h${_p(_n.getMinutes())}`;
     const out=await zip.generateAsync({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
@@ -1809,7 +1799,7 @@ function cloneRowStr(rows,n){
   if(!src) return '<row r="'+n+'"></row>';
   let t=expandRow(src,n).replace(/^<row r="\d+"/,'<row r="'+n+'"');
   t=t.replace(/ r="([A-Z]+)\d+"/g,(x,c)=>' r="'+c+n+'"');
-  t=t.replace(/<f\b([^>]*)>([\s\S]*?)<\/f>/g,(x,a,f)=>'<f'+a+'>'+f.replace(/([A-Z]\$?)\d+/g,(y,p)=>p+n)+'</f>');
+  t=t.replace(/<f\b([^>]*?)(?<!\/)>([\s\S]*?)<\/f>/g,(x,a,f)=>'<f'+a+'>'+f.replace(/([A-Z]\$?)\d+/g,(y,p)=>p+n)+'</f>');
   return t;
 }
 // Ghi số nền (đầu kỳ C, biên chế E, số phòng R) của tool vào bảng tổng hợp theo đúng dòng đơn vị
@@ -1922,7 +1912,7 @@ function shiftFormula(f, at, k, own, sumName){
 }
 function shiftSqref(sq, at, k){ return sq.split(/\s+/).map(x=>shiftFormula(x,at,k,true,"")).join(" "); }
 function shiftFormulaTags(x, at, k, own, sumName){
-  return x.replace(/<(f|formula|formula1|formula2)\b([^>]*)>([\s\S]*?)<\/\1>/g,(m,tag,a,f)=>{
+  return x.replace(/<(f|formula|formula1|formula2)\b([^>]*?)(?<!\/)>([\s\S]*?)<\/\1>/g,(m,tag,a,f)=>{
     if(own) a=a.replace(/\bref="([^"]*)"/,(y,r)=>'ref="'+shiftSqref(r,at,k)+'"');
     return '<'+tag+a+'>'+xmlEsc(shiftFormula(xmlUnesc(f),at,k,own,sumName))+'</'+tag+'>';
   });
@@ -1939,7 +1929,7 @@ function insertSummaryRows(xml, at, k, sumName){
   }
   let pre=xml.slice(0,sdm.index), post=xml.slice(sdm.index+sdm[0].length);
   const fixOuter=x=>shiftFormulaTags(x,at,k,true,sumName)
-    .replace(/(<(?:mergeCell|dimension|autoFilter)\b[^>]*?\bref=")([^"]*)"/g,(m,a,r)=>a+shiftSqref(r,at,k)+'"')
+    .replace(/(<(?:mergeCell|dimension|autoFilter|hyperlink)\b[^>]*?\bref=")([^"]*)"/g,(m,a,r)=>a+shiftSqref(r,at,k)+'"')
     .replace(/(<(?:conditionalFormatting|dataValidation|selection)\b[^>]*?\bsqref=")([^"]*)"/g,(m,a,r)=>a+shiftSqref(r,at,k)+'"')
     .replace(/(<brk\b[^>]*?\bid=")(\d+)"/g,(m,a,d)=>a+(+d>=at?+d+k:+d)+'"');
   pre=fixOuter(pre); post=fixOuter(post);
@@ -1960,7 +1950,7 @@ function safeSheetName(name, existing){
   while(low.has(n.toLowerCase())){ const suf=" ("+(i++)+")"; n=base.slice(0,31-suf.length)+suf; }
   return n;
 }
-async function addNewUnitsToZip(zip, snap, owb, nameToPath){
+async function addNewUnitsToZip(zip, snap, owb, nameToPath, sheetsOnly){
   const newUnits=snap.units.filter(u=>u._new && !nameToPath[u.sheetName]);
   if(!newUnits.length) return [];
   const SUM="4-2026", sumPath=nameToPath[SUM], fws=owb.Sheets[SUM];
@@ -2025,7 +2015,7 @@ async function addNewUnitsToZip(zip, snap, owb, nameToPath){
   zip.file("xl/workbook.xml",wx); zip.file(relsPath,rx); zip.file(ctPath,ct);
 
   // ---- chèn dòng vào bảng tổng hợp ----
-  if(sumPath && zip.file(sumPath) && fws){
+  if(!sheetsOnly && sumPath && zip.file(sumPath) && fws){
     const ob=parseSummaryBases(owb);
     let sx=unshareFormulas(await zip.file(sumPath).async("string"), fws);
     const sections=[["VC",ob.vc],["CC",ob.cc]];          // VC nằm dưới -> chèn trước để không lệch số dòng CC
@@ -2065,6 +2055,126 @@ async function addNewUnitsToZip(zip, snap, owb, nameToPath){
     zip.file(sumPath, sx);
   }
   return added;
+}
+/* ===== Bảng tổng hợp "4-2026": ghi lại TOÀN BỘ bằng số (không công thức), đúng thứ tự & số liệu trên app ===== */
+function blankRowFrom(tpl,n){
+  return expandRow(tpl,n).replace(/^<row r="\d+"/,'<row r="'+n+'"').replace(/\s+hidden="1"/,"")
+    .replace(/<c r="([A-Z]+)\d+"([^>]*?)(?:\/>|>[\s\S]*?<\/c>)/g,(m,c,a)=>{const s=(a.match(/\bs="\d+"/)||[""])[0];return '<c r="'+c+n+'"'+(s?" "+s:"")+'/>';});
+}
+function stripFormulas(xml){   // bỏ mọi công thức, giữ lại giá trị
+  return xml.replace(/<c r="([A-Z]+\d+)"([^>]*?)>([\s\S]*?)<\/c>/g,(m,ref,a,inner)=>{
+    if(!/<f\b/.test(inner)) return m;
+    const v=(inner.match(/<v>([\s\S]*?)<\/v>/)||[])[1];
+    const t=(a.match(/\bt="([^"]*)"/)||[])[1];
+    const a2=a.replace(/\s*\bt="[^"]*"/,"");
+    if(v==null || t==="e") return '<c r="'+ref+'"'+a2+'/>';
+    if(t==="str") return '<c r="'+ref+'"'+a2+' t="inlineStr"><is><t xml:space="preserve">'+v+'</t></is></c>';
+    if(t==="b") return '<c r="'+ref+'"'+a2+' t="b"><v>'+v+'</v></c>';
+    return '<c r="'+ref+'"'+a2+'><v>'+v+'</v></c>';
+  });
+}
+async function rewriteSummaryValues(zip, snap, owb, nameToPath, added){
+  const SUM="4-2026", path=nameToPath[SUM], ows=owb.Sheets[SUM];
+  if(!path||!zip.file(path)||!ows) return;
+  // vị trí các mốc trong file gốc
+  const rg=XLSX.utils.decode_range(ows["!ref"]); const mark={};
+  for(let r=rg.s.r;r<=rg.e.r;r++){
+    const b=cellVal(ows,r,1), a=cellVal(ows,r,0); const nm=typeof b==="string"?b.trim():"";
+    if(nm==="CÔNG CHỨC"&&!mark.ccHead) mark.ccHead=r+1;
+    else if(nm==="VIÊN CHỨC"&&!mark.vcHead) mark.vcHead=r+1;
+    else if(/^TỔNG/i.test(nm)){
+      if(/VÀ/i.test(nm)) mark.grand=r+1;
+      else if(mark.vcHead && !mark.vcTot) mark.vcTot=r+1;
+      else if(mark.ccHead && !mark.ccTot && !mark.vcHead) mark.ccTot=r+1;
+    }
+    else if(nm==="Số công chức") mark.sumCC=r+1;
+    else if(nm==="Số viên chức") mark.sumVC=r+1;
+    else if(nm==="Số lao động hợp đồng") mark.sumHD=r+1;
+    else if(typeof a==="string"&&a.trim()==="Tổng cộng") mark.sumAll=r+1;
+  }
+  if(!mark.ccHead||!mark.ccTot){ toast("Không nhận diện được bảng tổng hợp CÔNG CHỨC"); return; }
+  let xml=await zip.file(path).async("string");
+  const getRows=x=>{const sd=x.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/);const rows=new Map();const rr=/<row r="(\d+)"[^>]*?(?:\/>|>[\s\S]*?<\/row>)/g;let m;while((m=rr.exec(sd[2])))rows.set(+m[1],m[0]);return {sd,rows};};
+  const putRows=(x,sd,rows)=>x.slice(0,sd.index)+sd[1]+[...rows.keys()].sort((a,b)=>a-b).map(n=>rows.get(n)).join("")+sd[3]+x.slice(sd.index+sd[0].length);
+  // mẫu định dạng lấy từ file gốc (trước khi sửa)
+  const o=getRows(xml).rows;
+  const tplUnit=o.get(mark.ccHead+2)||o.get(mark.ccHead+1);
+  let tplRes=null; for(let n=mark.ccHead+1;n<mark.ccTot;n++){const v=cellVal(ows,n-1,1); if(typeof v==="string"&&/^Dự phòng/i.test(v.trim())){tplRes=o.get(n);break;}}
+  tplRes=tplRes||tplUnit;
+  const sheetOf=u=>{const a=(added||[]).find(x=>x.u===u); return a?a.sheetName:(u.sheetName||u.name);};
+  const otherPaths=[...new Set(Object.entries(nameToPath).filter(([n])=>n!==SUM).map(([,p])=>p).concat((added||[]).map(a=>a.path)))];
+  const links=[]; let deltaCC=0, deltaVC=0;
+  const totals={};
+  const doBlock=async(kind,head,tot)=>{
+    const units=snap.units.filter(u=>u.kind===kind);
+    const reserve=(kind==="VC"?(snap.vcReserve??STATE.vcReserve):(snap.ccReserve??STATE.ccReserve))||0;
+    const need=units.length+1, avail=tot-head-1;
+    let delta=0;
+    if(need>avail){
+      delta=need-avail;
+      xml=insertSummaryRows(xml, tot, delta, SUM);
+      for(const pth of otherPaths){ if(!zip.file(pth))continue; const x=await zip.file(pth).async("string"); if(x.indexOf(SUM)>=0) zip.file(pth, shiftFormulaTags(x,tot,delta,false,SUM)); }
+      let w=await zip.file("xl/workbook.xml").async("string");
+      w=w.replace(/(<definedName\b[^>]*>)([\s\S]*?)(<\/definedName>)/g,(m,a,f,b)=>a+xmlEsc(shiftFormula(xmlUnesc(f),tot,delta,false,SUM))+b);
+      zip.file("xl/workbook.xml",w);
+      tot+=delta;
+    }
+    const {sd,rows}=getRows(xml);
+    const T={}; SUM_COLS.forEach(c=>T[c]=0);
+    units.forEach((u,i)=>{
+      const n=head+1+i, s=unitStats(u);
+      let t=blankRowFrom(tplUnit,n);
+      t=putValCell(t,"A",n,i+1).row;
+      t=setCellInRow(t,"B",n,u.name);
+      SUM_COLS.forEach(c=>{ const v=c==="X"?s.hd:s[c]; if(s.lead && "NOPQRSTUVW".includes(c)) return; t=putValCell(t,c,n,v).row; });
+      ["C","D","E","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W"].forEach(c=>T[c]+=(s.lead&&"NOPQRSTUVW".includes(c))?0:s[c]);
+      T.X+=s.hd;
+      rows.set(n,t); links.push({ref:"B"+n, sheet:sheetOf(u), name:u.name});
+    });
+    // dòng Dự phòng
+    const rn=head+1+units.length;
+    let t=blankRowFrom(tplRes,rn); t=setCellInRow(t,"B",rn,"Dự phòng"); t=putValCell(t,"E",rn,reserve).row; rows.set(rn,t);
+    // dòng thừa (nếu đơn vị ít hơn trước): xóa trắng + ẩn
+    for(let n=rn+1;n<tot;n++){ if(!rows.has(n))continue; let x=blankRowFrom(rows.get(n),n); x=x.replace(/^(<row\b[^>]*?)(\s*\/?>)/,(m,p1,p2)=>p1+' hidden="1"'+p2); rows.set(n,x); }
+    // dòng TỔNG
+    T.E+=reserve; T.F=T.D-T.E;
+    if(rows.has(tot)){ let x=rows.get(tot); SUM_COLS.forEach(c=>{ x=putValCell(x,c,tot,T[c]).row; }); rows.set(tot,x); }
+    xml=putRows(xml,sd,rows); totals[kind]=T;
+    return delta;
+  };
+  deltaCC=await doBlock("CC", mark.ccHead, mark.ccTot);
+  if(mark.vcHead && mark.vcTot) deltaVC=await doBlock("VC", mark.vcHead+deltaCC, mark.vcTot+deltaCC);
+  const nr=r=>r+(r>=mark.ccTot?deltaCC:0)+(mark.vcTot&&r>=mark.vcTot?deltaVC:0);
+  const Z={}; SUM_COLS.forEach(c=>Z[c]=0);
+  const CC=totals.CC||Z, VC=totals.VC||Z;
+  const {sd,rows}=getRows(xml);
+  const setRow=(r,map)=>{ if(!r)return; const n=nr(r); if(!rows.has(n))return; let x=rows.get(n); for(const c in map) x=putValCell(x,c,n,map[c]).row; rows.set(n,x); };
+  if(mark.grand){ const G={}; SUM_COLS.forEach(c=>G[c]=CC[c]+VC[c]); G.F=G.D-G.E; setRow(mark.grand,G); }
+  setRow(mark.sumCC,{D:CC.D,E:CC.E}); setRow(mark.sumVC,{D:VC.D,E:VC.E});
+  let hdD=CC.X+VC.X;
+  if(mark.sumHD) setRow(mark.sumHD,{D:hdD});   // = tổng cột Lao động hợp đồng trên app
+  if(mark.sumAll) setRow(mark.sumAll,{D:CC.D+VC.D+hdD, E:CC.E+VC.E});
+  // tiêu đề: cập nhật tháng
+  const [yy,mm]=String(snap.trackingMonth||"").split("-").map(Number);
+  if(yy&&mm){
+    const pm=mm===1?12:mm-1, py=mm===1?yy-1:yy, last=new Date(py,pm,0).getDate();
+    const fix=(r,c,fn)=>{const v=cellVal(ows,r-1,c); if(typeof v!=="string")return; const nv=fn(v); if(nv===v)return; const n=nr(r); if(!rows.has(n))return; rows.set(n, setCellInRow(expandRow(rows.get(n),n), XLSX.utils.encode_col(c), n, nv));};
+    for(let r=1;r<=mark.ccHead;r++) for(let c=0;c<=23;c++) fix(r,c,v=>v.replace(/tháng\s*\d{1,2}\/\d{4}/i,"tháng "+mm+"/"+yy).replace(/đến\s*\d{1,2}\/\d{1,2}\/\d{4}/i,"đến "+last+"/"+pm+"/"+py));
+  }
+  xml=putRows(xml,sd,rows);
+  xml=stripFormulas(xml);
+  // liên kết tên đơn vị -> sheet
+  const inBlock=ref=>{const n=+ref.replace(/^[A-Z]+/,""); return links.some(l=>l.ref==="B"+n) || (n>mark.ccHead && n<nr(mark.ccTot)) || (mark.vcHead && n>nr(mark.vcHead) && n<nr(mark.vcTot));};
+  const newLinks=links.map(l=>'<hyperlink ref="'+l.ref+'" location="'+xmlEsc("'"+l.sheet.replace(/'/g,"''")+"'!A1").replace(/"/g,"&quot;")+'" display="'+xmlEsc(l.name).replace(/"/g,"&quot;")+'"/>').join("");
+  if(/<hyperlinks>/.test(xml)){
+    xml=xml.replace(/<hyperlinks>([\s\S]*?)<\/hyperlinks>/,(m,inner)=>{
+      const keep=(inner.match(/<hyperlink\b[^>]*\/>/g)||[]).filter(h=>{const r=(h.match(/\bref="([^"]*)"/)||[])[1]||""; return /:/.test(r)||!inBlock(r);});
+      return '<hyperlinks>'+keep.join("")+newLinks+'</hyperlinks>';
+    });
+  } else if(newLinks){
+    xml=xml.replace(/(<\/sheetData>(?:[\s\S]*?<(?:sheetCalcPr|sheetProtection|protectedRanges|scenarios|autoFilter|sortState|dataConsolidate|customSheetViews|mergeCells|phoneticPr|conditionalFormatting|dataValidations)\b[\s\S]*?(?:\/>|<\/(?:sheetCalcPr|sheetProtection|protectedRanges|scenarios|autoFilter|sortState|dataConsolidate|customSheetViews|mergeCells|phoneticPr|conditionalFormatting|dataValidations)>))*)/, '$1<hyperlinks>'+newLinks+'</hyperlinks>');
+  }
+  zip.file(path, xml);
 }
 function blankSummaryRows(xml, rowNums){
   const sdm=xml.match(/(<sheetData\b[^>]*>)([\s\S]*?)(<\/sheetData>)/); if(!sdm)return xml;
